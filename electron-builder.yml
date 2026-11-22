@@ -1,0 +1,36 @@
+appId: com.quotagirls.app
+productName: QuotaGirls
+copyright: Quota Girls
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+extraResources:
+  # 内置插画（用户覆盖目录 %APPDATA%/QuotaGirls/art 优先）
+  - from: art
+    to: art
+  # 托盘 / 窗口图标
+  - from: resources
+    to: resources
+asar: true
+npmRebuild: false
+electronDownload:
+  mirror: https://npmmirror.com/mirrors/electron/
+win:
+  icon: build/icon.png
+  executableName: QuotaGirls
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 额度娘 Quota Girls
+  uninstallDisplayName: 额度娘 Quota Girls
+  artifactName: QuotaGirls-Setup-${version}.exe

@@ -1,0 +1,18 @@
+.overview {
+  position: absolute;
+  inset: var(--titlebar-h) 0 0 0;
+  padding: 18px 16px 16px;
+  display: flex;
+  gap: 16px;
+  background:
+    radial-gradient(60% 50% at 15% 110%, rgba(217, 119, 87, 0.08), transparent 70%),
+    radial-gradient(50% 50% at 50% 115%, rgba(16, 163, 127, 0.07), transparent 70%),
+    radial-gradient(60% 50% at 88% 110%, rgba(66, 133, 244, 0.09), transparent 70%),
+    var(--bg);
+}
+
+.slot {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+}

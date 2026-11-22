@@ -1,0 +1,564 @@
+.card {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #10131b;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  container-type: size;
+  isolation: isolate;
+  outline: none;
+  transition:
+    transform 0.4s var(--ease-out),
+    border-color 0.4s,
+    box-shadow 0.4s;
+}
+
+.card:hover,
+.card:focus-visible {
+  transform: translateY(-6px);
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent),
+    0 0 28px -6px color-mix(in srgb, var(--accent) 55%, transparent),
+    0 24px 60px -24px rgba(0, 0, 0, 0.8);
+}
+
+/* ── 插画层 ── */
+.art {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  transition:
+    transform 0.8s var(--ease-out),
+    filter 0.5s;
+}
+
+.card:hover .art {
+  transform: scale(1.03);
+}
+
+.dim .art {
+  filter: saturate(0.3) brightness(0.72);
+}
+
+.artLow {
+  filter: saturate(0.75) brightness(0.88) sepia(0.12) hue-rotate(-10deg);
+}
+
+.artEmpty {
+  filter: grayscale(1) brightness(0.58) contrast(1.05);
+}
+
+.lowVignette {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(ellipse 80% 70% at 50% 36%, transparent 40%, rgba(255, 60, 70, 0.32) 100%);
+  animation: pulse-dot 3.2s ease-in-out infinite;
+}
+
+.topShade {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 20%;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(6, 8, 12, 0.88) 0%, rgba(6, 8, 12, 0.45) 50%, transparent 100%);
+}
+
+.bottomShade {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 62%;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(to top, rgba(6, 8, 12, 0.95) 0%, rgba(6, 8, 12, 0.6) 50%, transparent 100%);
+}
+
+.frame {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: var(--radius);
+  pointer-events: none;
+}
+
+/* ── 标题区（顶部 0–10%） ── */
+.header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 10%;
+  min-height: 46px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 16px;
+}
+
+.titleBlock {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.titleText {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* 平台官方图标徽章 */
+.iconBadge {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(8, 10, 14, 0.62);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow: 0 0 12px -2px color-mix(in srgb, var(--accent) 45%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.no {
+  font-family: var(--font-num);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: var(--accent);
+}
+
+.name {
+  font-family: var(--font-num);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.24em;
+  color: #fff;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plan {
+  flex: none;
+  font-family: var(--font-num);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 3px 10px;
+  border-radius: 99px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  background: rgba(8, 10, 14, 0.5);
+  color: color-mix(in srgb, var(--accent) 45%, #fff);
+  backdrop-filter: blur(6px);
+}
+
+/* ── 印章 / 未连接 ── */
+.stamp {
+  position: absolute;
+  top: 34%;
+  left: 50%;
+  z-index: 4;
+  transform: translate(-50%, -50%) rotate(-10deg);
+  padding: 12px 20px 10px;
+  border: 3px double var(--red);
+  border-radius: 10px;
+  color: var(--red);
+  text-align: center;
+  background: rgba(40, 6, 10, 0.35);
+  backdrop-filter: blur(2px);
+  text-shadow: 0 0 14px rgba(255, 90, 95, 0.6);
+  box-shadow: 0 0 24px rgba(255, 90, 95, 0.25);
+  animation: stamp-in 0.55s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+  white-space: nowrap;
+}
+
+@keyframes stamp-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(-10deg) scale(1.8);
+  }
+}
+
+/* 有耗尽差分图时：小一号，盖在数据面板上方右侧，不挡角色的脸 */
+.stampCompact {
+  top: auto;
+  left: auto;
+  right: 18px;
+  bottom: calc(42% + 14px);
+  padding: 8px 13px 7px;
+  transform: rotate(-8deg);
+  transform-origin: right bottom;
+  animation-name: stamp-in-compact;
+}
+
+.stampCompact .stampMain {
+  font-size: 19px;
+}
+
+.stampCompact .stampSub {
+  margin-top: 5px;
+  font-size: 8.5px;
+}
+
+@keyframes stamp-in-compact {
+  from {
+    opacity: 0;
+    transform: rotate(-8deg) scale(1.8);
+  }
+}
+
+.stampMain {
+  font-family: var(--font-cn);
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  line-height: 1;
+}
+
+.stampSub {
+  margin-top: 8px;
+  font-family: var(--font-num);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+}
+
+.disconnected {
+  position: absolute;
+  top: 34%;
+  left: 50%;
+  z-index: 4;
+  transform: translate(-50%, -50%);
+  padding: 16px 26px 14px;
+  border-radius: 14px;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+  background: rgba(8, 10, 14, 0.72);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(10px);
+}
+
+.discMain {
+  font-family: var(--font-cn);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.8);
+}
+
+.discSub {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 4px 12px;
+  border-radius: 99px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  color: var(--fg-2);
+}
+
+/* ── 数据面板（下 42%） ── */
+.panel {
+  --ring: 88px;
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  height: calc(42% - 10px);
+  z-index: 5;
+  border-radius: 14px;
+  padding: 14px 16px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  overflow: hidden;
+}
+
+.mainRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.ringBox {
+  flex: none;
+}
+
+.ringLabel {
+  font-size: 11px;
+  color: var(--fg-2);
+  max-width: 72%;
+  line-height: 1.2;
+}
+
+.kickerGroup {
+  font-size: 10.5px;
+  color: var(--fg-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mainNum {
+  min-width: 0;
+  flex: 1;
+}
+
+.kicker {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.big {
+  display: flex;
+  align-items: baseline;
+  font-family: var(--font-num);
+  font-size: 48px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  margin: 4px 0 4px;
+  transition: color 0.4s;
+}
+
+.pct {
+  font-size: 20px;
+  font-weight: 500;
+  margin-left: 3px;
+  opacity: 0.8;
+}
+
+.breathe {
+  animation: breathe 2.4s ease-in-out infinite;
+}
+
+.bigLabel {
+  font-size: 12px;
+  color: var(--fg-2);
+  letter-spacing: 0.12em;
+}
+
+.countdown {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.cdText {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.bars {
+  display: grid;
+  gap: 7px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line-2);
+}
+
+.barRow {
+  display: grid;
+  grid-template-columns: minmax(48px, 36%) 1fr 36px;
+  align-items: center;
+  gap: 10px;
+  font-size: 11.5px;
+}
+
+.barLabel {
+  color: var(--fg-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.barPct {
+  text-align: right;
+  font-family: var(--font-num);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.note {
+  font-size: 11.5px;
+  color: var(--fg-3);
+}
+
+.alert {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 90, 95, 0.1);
+  border: 1px solid rgba(255, 90, 95, 0.32);
+  font-size: 11.5px;
+  cursor: default;
+}
+
+.alertIcon {
+  color: var(--red);
+  align-self: start;
+  margin-top: 1px;
+}
+
+.dim .alert {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--line);
+}
+
+.dim .alertIcon {
+  color: var(--fg-3);
+}
+
+.alertBody {
+  min-width: 0;
+}
+
+.alertMsg {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.alertHint {
+  color: var(--fg-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.recheck {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+
+.recheck:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.recheck:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.footer {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--fg-3);
+  white-space: nowrap;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.skeleton {
+  display: flex;
+  flex-direction: column;
+}
+
+.skRing {
+  width: var(--ring);
+  height: var(--ring);
+  border-radius: 50%;
+}
+
+/* ── 小尺寸自适应（1024×680 / 150% 缩放） ── */
+@container (max-height: 640px) {
+  .panel {
+    --ring: 74px;
+    padding: 12px 14px 10px;
+    gap: 7px;
+  }
+  .big {
+    font-size: 40px;
+  }
+  .pct {
+    font-size: 17px;
+  }
+  .third {
+    display: none;
+  }
+}
+
+@container (max-height: 540px) {
+  .panel {
+    --ring: 64px;
+  }
+  .big {
+    font-size: 34px;
+  }
+  .bars .barRow:nth-child(2) {
+    display: none;
+  }
+}
+
+@container (max-width: 360px) {
+  .no {
+    display: none;
+  }
+  .name {
+    letter-spacing: 0.16em;
+  }
+}
+
+@container (max-width: 300px) {
+  .panel {
+    --ring: 66px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .mainRow {
+    gap: 10px;
+  }
+  .big {
+    font-size: 38px;
+  }
+  .name {
+    letter-spacing: 0.14em;
+    font-size: 14px;
+  }
+}

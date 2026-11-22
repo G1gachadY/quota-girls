@@ -1,0 +1,115 @@
+.bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--titlebar-h);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 16px;
+  -webkit-app-region: drag;
+  background: linear-gradient(to bottom, rgba(11, 13, 18, 0.92), rgba(11, 13, 18, 0.6));
+  border-bottom: 1px solid var(--line-2);
+}
+
+.transparent {
+  background: linear-gradient(to bottom, rgba(6, 8, 12, 0.55), rgba(6, 8, 12, 0));
+  border-bottom-color: transparent;
+}
+
+.left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.left button,
+.left a,
+.left [data-nodrag] {
+  -webkit-app-region: no-drag;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+
+.iconBtn {
+  width: 34px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--fg-2);
+  transition:
+    background 0.2s,
+    color 0.2s;
+}
+
+.iconBtn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg);
+}
+
+.spinning svg {
+  animation: spin 0.9s linear infinite;
+}
+
+.sep {
+  width: 1px;
+  height: 16px;
+  background: var(--line);
+  margin: 0 6px;
+}
+
+.winBtn {
+  width: 46px;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--fg-2);
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.winBtn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg);
+}
+
+.close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.logo {
+  align-self: center;
+}
+
+.cn {
+  font-family: var(--font-cn);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+}
+
+.en {
+  font-family: var(--font-num);
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.32em;
+  color: var(--fg-3);
+}

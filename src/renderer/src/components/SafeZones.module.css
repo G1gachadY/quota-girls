@@ -1,0 +1,95 @@
+.root {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 50;
+}
+
+.band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border: 1px dashed;
+}
+
+.band span,
+.faceBand span,
+.cross span {
+  position: absolute;
+  left: 8px;
+  top: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  white-space: nowrap;
+}
+
+.title {
+  border-color: #4dd0e1;
+  background: rgba(77, 208, 225, 0.12);
+  color: #4dd0e1;
+}
+
+.char {
+  border-color: #ff7ce0;
+  background: rgba(255, 124, 224, 0.06);
+  color: #ff7ce0;
+}
+
+.panel {
+  border-color: #ffd54f;
+  background: rgba(255, 213, 79, 0.1);
+  color: #ffd54f;
+}
+
+.faceBand {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid #ff7ce0;
+  border-bottom: 1px solid #ff7ce0;
+  background: rgba(255, 124, 224, 0.14);
+  color: #ff7ce0;
+}
+
+.faceBand span {
+  left: auto;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.cross {
+  position: absolute;
+  width: 0;
+  height: 0;
+  color: #ff7ce0;
+}
+
+.cross::before,
+.cross::after {
+  content: '';
+  position: absolute;
+  background: #ff7ce0;
+}
+
+.cross::before {
+  width: 80px;
+  height: 1px;
+  left: -40px;
+  top: 0;
+}
+
+.cross::after {
+  width: 1px;
+  height: 80px;
+  left: 0;
+  top: -40px;
+}
+
+.cross span {
+  left: 10px;
+  top: 10px;
+}

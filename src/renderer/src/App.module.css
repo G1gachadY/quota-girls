@@ -1,0 +1,114 @@
+.app {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.boot {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+}
+
+.detailLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  will-change: clip-path;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px 5px 6px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--fg-2);
+  transition:
+    background 0.2s,
+    color 0.2s;
+}
+
+.back:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg);
+}
+
+.tabs {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(10, 12, 18, 0.55);
+  border: 1px solid var(--line-2);
+  backdrop-filter: blur(10px);
+}
+
+.tabs button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 14px 4px 11px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--fg-2);
+  transition:
+    background 0.2s,
+    color 0.2s;
+}
+
+.tabs button:hover {
+  color: var(--fg);
+}
+
+.tabs button:not(.tabOn) img {
+  opacity: 0.6;
+  filter: saturate(0.6);
+  transition:
+    opacity 0.2s,
+    filter 0.2s;
+}
+
+.tabs button:not(.tabOn):hover img {
+  opacity: 1;
+  filter: none;
+}
+
+.tabs .tabOn {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--fg);
+}
+
+.tabs .tabOn::after {
+  content: '';
+  position: absolute;
+  left: 30%;
+  right: 30%;
+  bottom: 1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.guideTip {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  z-index: 60;
+  padding: 6px 14px;
+  border-radius: 99px;
+  background: rgba(0, 0, 0, 0.75);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  color: #ffd54f;
+  pointer-events: none;
+}

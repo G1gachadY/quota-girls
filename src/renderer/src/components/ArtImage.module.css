@@ -1,0 +1,195 @@
+.wrap {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  container-type: size;
+}
+
+.img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  -webkit-user-drag: none;
+}
+
+/* ── 竖版图放进横版槽位 ── */
+.side {
+  background: #0b0d12;
+}
+
+/* 同一张图放大虚化，铺满两侧空白 */
+.sideBg {
+  position: absolute;
+  left: -10%;
+  top: -10%;
+  width: 120%;
+  height: 120%;
+  object-fit: cover;
+  object-position: 50% 30%;
+  filter: blur(36px) saturate(1.15) brightness(0.55);
+  -webkit-user-drag: none;
+}
+
+/* 整幅竖版图靠右，左右边缘渐隐融进背景 */
+.sideFg {
+  position: absolute;
+  top: 0;
+  right: 4cqw;
+  height: 100cqh;
+  width: auto;
+  max-width: 64cqw;
+  object-fit: contain;
+  object-position: right center;
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, #000 14%, #000 86%, transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0%, #000 14%, #000 86%, transparent 100%);
+  -webkit-user-drag: none;
+}
+
+/* 以焦点为中心裁出脸部（宽度和位移由 style 给出） */
+.crop {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  height: auto;
+  max-width: none;
+  display: block;
+  -webkit-user-drag: none;
+}
+
+/* ── 占位图 ── */
+.ph {
+  background:
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.045) 0 1px, transparent 1px 11px),
+    radial-gradient(120% 80% at 70% 20%, color-mix(in srgb, var(--accent) 34%, transparent) 0%, transparent 60%),
+    linear-gradient(
+      150deg,
+      color-mix(in srgb, var(--accent) 52%, #0b0d12) 0%,
+      color-mix(in srgb, var(--accent) 20%, #0b0d12) 48%,
+      #0b0d12 100%
+    );
+}
+
+.letter {
+  position: absolute;
+  font-family: var(--font-num);
+  font-weight: 800;
+  line-height: 0.8;
+  color: rgba(255, 255, 255, 0.07);
+  letter-spacing: -0.04em;
+  pointer-events: none;
+}
+
+/* 巨大半透明平台官方图标（水印） */
+.logoMark {
+  position: absolute;
+  object-fit: contain;
+  opacity: 0.16;
+  pointer-events: none;
+  -webkit-user-drag: none;
+  filter: saturate(0.9);
+}
+
+.card .logoMark {
+  width: 118cqw;
+  height: 118cqw;
+  right: -42cqw;
+  top: 14cqh;
+}
+
+.hero .logoMark {
+  width: 62cqh;
+  height: 62cqh;
+  right: 12cqw;
+  top: 18cqh;
+  opacity: 0.2;
+}
+
+.avatar .letter {
+  position: static;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  font-size: 62cqh;
+  color: rgba(255, 255, 255, 0.85);
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.safe {
+  position: absolute;
+  border: 1.5px dashed rgba(255, 255, 255, 0.3);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-align: center;
+  padding: 12px;
+  color: rgba(255, 255, 255, 0.62);
+  background: rgba(0, 0, 0, 0.08);
+}
+
+/* card.png：角色位于上方 10–58% */
+.card .safe {
+  left: 9%;
+  right: 9%;
+  top: 11%;
+  height: 46%;
+}
+
+/* hero.png：角色位于右侧 45–100%，顶部 0–8% 为顶栏 */
+.hero .safe {
+  left: 47%;
+  right: 3%;
+  top: 10%;
+  bottom: 5%;
+}
+
+.safeTag {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.safePath {
+  font-family: var(--font-num);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.safeMeta {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* 脸部中心参考：card 22–30%，hero x=68% y=30% */
+.face {
+  position: absolute;
+  border: 1px dashed rgba(255, 255, 255, 0.28);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.card .face {
+  width: 34%;
+  aspect-ratio: 1;
+  left: 33%;
+  /* safe 区域 top 11%，高 46%：脸部 22–30% → 相对 safe ≈ 15%–35% */
+  top: 12%;
+}
+
+.hero .face {
+  width: 15%;
+  aspect-ratio: 1;
+  /* 绝对 x=68%：相对 safe(47%→97%) = 42% → 居中 */
+  left: calc(42% - 7.5%);
+  top: 12%;
+}
