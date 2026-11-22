@@ -6,7 +6,7 @@ import { IconAlert } from '../components/Icons'
 import { PlatformIcon } from '../components/PlatformIcon'
 import { SafeZones } from '../components/SafeZones'
 import { displayValue, fmtPct, levelColor, moodOf, pickArt, resetText, statusText, type PlatformView } from '../model'
-import { levelOf, remainingOf } from '@shared/quota'
+import { balancePercent, formatMoney, levelOf, remainingOf } from '@shared/quota'
 import s from './Card.module.css'
 
 interface Props {
@@ -25,7 +25,10 @@ export const CharacterCard = forwardRef<HTMLDivElement, Props>(function Characte
   ref
 ) {
   const mode = settings.displayMode
-  const value = displayValue(v.primary, mode)
+  const bal = v.balance
+  const value = bal
+    ? balancePercent(bal) ?? (bal.amount == null ? 100 : bal.amount > 0 ? 100 : 0)
+    : displayValue(v.primary, mode)
   const st = statusText(v, now)
   const loading = v.snap.status === 'loading' && !v.hasData
   const showAlert =
@@ -65,6 +68,7 @@ export const CharacterCard = forwardRef<HTMLDivElement, Props>(function Characte
           focus={art.focus}
           slot="card"
           platform={v.id}
+          kind={v.info.kind}
           accent={v.manifest.accent}
           letter={v.meta.name[0]}
         />
@@ -77,7 +81,7 @@ export const CharacterCard = forwardRef<HTMLDivElement, Props>(function Characte
       <div className={s.header}>
         <div className={s.titleBlock}>
           <span className={s.iconBadge}>
-            <PlatformIcon id={v.id} size={18} />
+            <PlatformIcon kind={v.info.kind} name={v.meta.name} size={18} />
           </span>
           <span className={s.titleText}>
             <span className={s.no}>NO.{v.meta.no}</span>
@@ -89,15 +93,23 @@ export const CharacterCard = forwardRef<HTMLDivElement, Props>(function Characte
 
       {v.level === 'empty' && (
         <div className={`${s.stamp} ${art.variant ? s.stampCompact : ''}`}>
-          <div className={s.stampMain}>{v.copy.exhausted}</div>
-          <div className={s.stampSub}>EXHAUSTED · {resetText(v.primary, now, v.copy)}</div>
+          <div className={s.stampMain}>{bal ? '余额耗尽' : v.copy.exhausted}</div>
+          <div className={s.stampSub}>EXHAUSTED · {bal ? '充值后恢复' : resetText(v.primary, now, v.copy)}</div>
         </div>
       )}
 
       {v.disconnected && !loading && (
         <div className={s.disconnected}>
-          <div className={s.discMain}>{v.snap.status === 'offline' ? '未运行' : '未连接'}</div>
-          <div className={s.discSub}>{v.snap.status === 'offline' ? v.snap.error?.hint ?? '打开后自动读取' : '点击设置'}</div>
+          <div className={s.discMain}>
+            {v.snap.status === 'offline' ? '未运行' : v.snap.status === 'error' ? '连接失败' : '未连接'}
+          </div>
+          <div className={s.discSub}>
+            {v.snap.status === 'offline'
+              ? v.snap.error?.hint ?? '打开后自动读取'
+              : v.snap.status === 'error'
+                ? '稍后自动重试'
+                : '点击设置'}
+          </div>
         </div>
       )}
 
@@ -106,6 +118,10 @@ export const CharacterCard = forwardRef<HTMLDivElement, Props>(function Characte
           <Skeleton />
         ) : (
           <>
+            {bal ? (
+              <BalanceBlock view={v} value={value} />
+            ) : (
+            <>
             <div className={s.mainRow}>
               <Ring
                 value={value}
@@ -133,6 +149,8 @@ export const CharacterCard = forwardRef<HTMLDivElement, Props>(function Characte
               <span className="deco">RESET IN</span>
               <span className={s.cdText}>{resetText(v.primary, now, v.copy)}</span>
             </div>
+            </>
+            )}
 
             {showAlert ? (
               <div className={s.alert} onClick={(e) => e.stopPropagation()}>
@@ -166,6 +184,20 @@ export const CharacterCard = forwardRef<HTMLDivElement, Props>(function Characte
                     </div>
                   )
                 })}
+                {bal &&
+                  (bal.parts ?? [])
+                    .filter((part) => part.amount > 0)
+                    .slice(0, 3)
+                    .map((part) => (
+                      <div key={part.label} className={`${s.barRow} ${s.moneyRow}`}>
+                        <span className={s.barLabel}>{part.label}</span>
+                        <Bar
+                          value={bal.amount && bal.amount > 0 ? Math.min(100, (part.amount / bal.amount) * 100) : 0}
+                          color={v.manifest.accent}
+                        />
+                        <span className={s.barPct}>{formatMoney(part.amount, bal.currency)}</span>
+                      </div>
+                    ))}
                 {v.others.length === 0 && v.snap.note && <div className={s.note}>{v.snap.note}</div>}
               </div>
             )}
@@ -201,5 +233,39 @@ function Skeleton() {
       <div className="skeleton" style={{ height: 6, width: '100%', marginTop: 14 }} />
       <div className="skeleton" style={{ height: 6, width: '100%', marginTop: 10 }} />
     </div>
+  )
+}
+
+/** 按量付费平台：环 = 剩余/总额（不知道总额时满环），大字 = 余额 */
+function BalanceBlock({ view: v, value }: { view: PlatformView; value: number | null }) {
+  const b = v.balance!
+  const pct = balancePercent(b)
+  const unlimited = b.amount == null
+  return (
+    <>
+      <div className={s.mainRow}>
+        <Ring value={value} color={v.color} glow={v.level === 'low'} className={s.ringBox} size="var(--ring)">
+          <span className={s.ringLabel}>{pct != null ? `${fmtPct(pct)}%` : unlimited ? '不限额' : '余额'}</span>
+        </Ring>
+        <div className={s.mainNum}>
+          <div className={s.kicker}>
+            <span className="deco">{unlimited ? 'USED' : 'BALANCE'}</span>
+            {b.currency && <span className={s.kickerGroup}>{b.currency}</span>}
+          </div>
+          <div className={`${s.big} ${s.bigMoney} ${v.level === 'low' ? s.breathe : ''}`} style={{ color: v.color }}>
+            {formatMoney(unlimited ? b.used ?? null : b.amount, b.currency)}
+          </div>
+          <div className={s.bigLabel}>
+            {unlimited ? '已用（令牌不限额）' : b.total ? `总额 ${formatMoney(b.total, b.currency)}` : '账户余额'}
+          </div>
+        </div>
+      </div>
+      <div className={s.countdown}>
+        <span className="deco">BILLING</span>
+        <span className={s.cdText}>
+          {b.used != null && !unlimited ? `已用 ${formatMoney(b.used, b.currency)}` : '按量付费 · 不会自动回满'}
+        </span>
+      </div>
+    </>
   )
 }

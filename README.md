@@ -1,14 +1,16 @@
 # 额度娘 Quota Girls
 
-Windows 桌面程序，用二次元"角色编成"界面同时显示三个 AI 订阅的剩余额度：
+Windows 桌面程序，用二次元"角色编成"界面同时显示多个 AI 平台的剩余额度：
 
-| 角色 | 平台 | 额度范围 |
+| 角色 | 平台 | 显示什么 |
 | --- | --- | --- |
-| NO.01 | **Claude** | 桌面版 / 网页 / Claude Code 共用一份 |
-| NO.02 | **Codex** | ChatGPT 订阅 |
-| NO.03 | **Antigravity** | Google（Gemini 组 / Claude 与 GPT 组 / 单模型限额） |
+| NO.01 | **Claude** | 订阅额度（桌面版 / 网页 / Claude Code 共用一份） |
+| NO.02 | **Codex** | ChatGPT 订阅额度 |
+| NO.03 | **Antigravity** | Google 订阅额度（Gemini 组 / Claude 与 GPT 组 / 单模型限额） |
+| NO.04 | **DeepSeek** | 按量付费的账户余额（Key 自动从 CC Switch 读取） |
+| NO.05… | **第三方平台** | 设置里自己添加：中转站（New API / One API）、OpenRouter、Kimi、硅基流动、自定义 JSON 接口 |
 
-额度 = 角色"体力"，重置 = "体力回满"。
+订阅额度 = 角色"体力"，重置 = "体力回满"；按量付费平台显示余额，低于提醒线时变红并通知。平台超过 3 个时总览页可以横向滚动（滚轮即可），不用的平台可以在设置里隐藏。
 
 > ⚠️ 三个平台的数据接口都是**非官方内部接口**，随时可能改字段或失效。程序对字段缺失做了宽容处理（不会崩溃，只会显示"—"或报错提示），出问题时先运行 `npm run probe` 看原始响应。
 
@@ -38,7 +40,8 @@ $env:ELECTRON_MIRROR = 'https://npmmirror.com/mirrors/electron/'; node node_modu
 npm run probe -- codex
 npm run probe -- codex rpc
 npm run probe -- claude web
-npm run probe -- value          # 打印三个平台本机用量按官方 API 定价折算的结果
+npm run probe -- deepseek       # DeepSeek 余额（自定义平台用它的 id，如 x-abc123）
+npm run probe -- value          # 打印 Claude / Codex / Antigravity 本机用量按官方 API 定价折算的结果
 ```
 
 开发时如果已安装的正式版正在运行，开发版会因为单实例锁直接退出。设置 `QG_USER_DATA` 用独立的数据目录即可同时运行：
@@ -47,7 +50,7 @@ npm run probe -- value          # 打印三个平台本机用量按官方 API �
 $env:QG_USER_DATA = "$env:TEMP\qg-dev"; npm run dev
 ```
 
-在普通浏览器里打开 `npm run dev` 打印的 renderer 地址（http://localhost:5173）会用**假数据**渲染界面，方便调样式；加 `?scenario=states` / `?scenario=low` / `?scenario=tight` / `?scenario=empty` / `?scenario=loading` 可以看各种状态，`#mini` 是迷你挂件。插画取自项目 `art/`（开发服务器在 `/__art/` 下提供，仅开发时存在）。
+在普通浏览器里打开 `npm run dev` 打印的 renderer 地址（http://localhost:5173）会用**假数据**渲染界面，方便调样式；加 `?scenario=states` / `?scenario=low` / `?scenario=tight` / `?scenario=empty` / `?scenario=loading` 可以看各种状态，`#mini` 是迷你挂件。预览里还有两个演示用的第三方平台（我的中转站、Kimi），只在浏览器预览里出现。插画取自项目 `art/`（开发服务器在 `/__art/` 下提供，仅开发时存在）。
 
 ---
 
@@ -105,7 +108,29 @@ $env:QG_USER_DATA = "$env:TEMP\qg-dev"; npm run dev
    - HTTPS 都失败时改用 HTTP 端口（新版为 `httpPort`，旧版为 `extension_server_port` + `extension_server_csrf_token`）。
 4. `usedPercent = (1 - remainingFraction) × 100`；`resetTime` 先按 ISO 解析，失败按 Unix 秒。
 
-自签名证书**只对 127.0.0.1 放行**（Node https，`rejectUnauthorized: false` 只用在本地请求上）；官方域名走 Electron `net.fetch`（Chromium 网络栈，**自动跟随 Windows 系统代理**，正常校验证书），并且代码里有白名单：token 只会发往 `api.anthropic.com`、`claude.ai`、`chatgpt.com` 或 `127.0.0.1`。
+### DeepSeek（余额）
+
+`GET https://api.deepseek.com/user/balance`（`Authorization: Bearer <key>`）→ `balance_infos[] { currency, total_balance, granted_balance, topped_up_balance }`，优先显示人民币那一项，明细显示充值 / 赠送。`is_available: false` 时提示余额不足。
+
+Key 按顺序找：设置里手动填的 → 环境变量 `DEEPSEEK_API_KEY` → **CC Switch**（`~/.cc-switch/cc-switch.db`，只读）。CC Switch 里只认"成对"的字段：Claude / Gemini 供应商的 `env.ANTHROPIC_BASE_URL`（或 `GOOGLE_GEMINI_BASE_URL`）指向 `api.deepseek.com` 时，取同一份配置里的 `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY`（或 `GEMINI_API_KEY`）。Codex 供应商的配置里地址和 Key 对应关系不明确（还可能含 ChatGPT 登录的 refresh_token），一律不读。
+
+### 第三方平台（设置 → 平台连接 → 添加第三方平台）
+
+| 类型 | 查询 | 需要填 |
+| --- | --- | --- |
+| 中转站（API Key） | New API / One API 等的 OpenAI 兼容账单接口：`/v1/dashboard/billing/subscription`（额度 `hard_limit_usd`）+ `/v1/dashboard/billing/usage`（已用 `total_usage`，美分） | 地址、令牌 sk-… |
+| New API 账户 | `/api/user/self`（头 `New-Api-User`），整个账户的 `quota` / `used_quota`，按 500000 = $1 换算 | 地址、用户 ID、系统访问令牌 |
+| OpenRouter | `/api/v1/credits`（失败退回 `/api/v1/key` 的额度上限） | Key |
+| Kimi 开放平台 | `api.moonshot.cn/v1/users/me/balance`（现金 / 代金券） | Key |
+| 硅基流动 | `api.siliconflow.cn/v1/user/info`（充值 / 赠送） | Key |
+| DeepSeek（另一个账号） | 同上面的 DeepSeek | Key |
+| 自定义 JSON 接口 | GET 你填的地址，按字段路径取剩余（和总额），如 `data.balance`、`data.items[0].remain` | 地址、字段路径、单位、Key（可空，以 Bearer 发送） |
+
+中转站 / JSON 地址只接受 `https://`（本机的可以用 `http://localhost`）。令牌不限额度时卡片显示已用量。
+
+### 网络
+
+自签名证书**只对 127.0.0.1 放行**（Node https，`rejectUnauthorized: false` 只用在本地请求上）；官方域名走 Electron `net.fetch`（Chromium 网络栈，**自动跟随 Windows 系统代理**，正常校验证书），并且代码里有白名单：订阅平台的 token 只会发往 `api.anthropic.com`、`claude.ai`、`chatgpt.com` 或 `127.0.0.1`；DeepSeek 的 Key 只发往 `api.deepseek.com`；第三方平台的 Key 只发往这个平台自己的域名（官方类型固定为官方域名，中转站 / JSON 为你填的地址），请求禁止重定向。
 
 ---
 
@@ -148,13 +173,14 @@ $env:QG_USER_DATA = "$env:TEMP\qg-dev"; npm run dev
 - 原始响应面板、probe 输出、日志里的 token / cookie / 邮箱 / UUID 一律打码。界面上的邮箱默认打码（设置可关）。
 - IPC 只接受来自本程序页面的调用；应用窗口禁止导航到外部页面、默认拒绝一切权限请求。
 - 等价 API 价值只**读**本机用量记录（Claude Code / Codex 的 JSONL 会话记录、Antigravity 的对话数据库，SQLite 只读打开），只提取模型名、时间和 token 数，不保存也不传出对话内容；价目表内置在程序里，不联网。
+- DeepSeek 和第三方平台的 Key 用 Electron `safeStorage`（Windows DPAPI，绑定当前 Windows 账户）加密后存在 `%APPDATA%\QuotaGirls\secrets.json`，只在后台进程里解密使用，界面只知道"有没有 Key、从哪来"。删除平台时一并删除它的 Key。
 - 无任何遥测。数据保存在 `%APPDATA%\QuotaGirls\`：`settings.json`、`history.json`（7 天，5 分钟一个点）、`snapshots.json`（上次快照）、`notified.json`（通知去重）。网页登录的 cookie 在同目录 `Partitions\claude-web`，设置里"退出网页登录"会清除。
 
 ---
 
 ## 换插画
 
-插画放在 `art/<platform>/`（platform = `claude` | `codex` | `antigravity`）。项目里已经放好三位角色的整套插画（常态 + 体力紧张 + 体力耗尽，webp 格式）：
+插画放在 `art/<platform>/`（platform = `claude` | `codex` | `antigravity` | `deepseek`；第三方平台的目录名是它的 id，如 `x-abc123`，占位图上会写出完整路径）。项目里已经放好前三位角色的整套插画（常态 + 体力紧张 + 体力耗尽，webp 格式）；DeepSeek 和第三方平台暂时是带官方图标（或首字母）的占位图。余额平台的"紧张 / 耗尽"按余额判断：低于提醒线（或剩余不到总额 20%）为紧张，用完为耗尽。
 
 | 文件 | 尺寸 | 必需 | 用途 |
 | --- | --- | --- | --- |
@@ -199,6 +225,10 @@ $env:QG_USER_DATA = "$env:TEMP\qg-dev"; npm run dev
 | Claude | Anthropic「Claude Code」VS Code 扩展 `resources/claude-logo.svg` / `.png` | `src/renderer/src/assets/platforms/claude.svg`、`resources/platforms/claude.png` |
 | Codex | OpenAI「Codex」VS Code 扩展 `webview/assets/codex-app-ga-logo-*.png`；大图水印用 `codex-home-hero-dark-still-*.png`（黑底转为透明） | `codex.png`、`codex-large.png`、`resources/platforms/codex.png` |
 | Antigravity | Antigravity 桌面 App `app.asar` 里的 `icon.png`；界面内去掉白色圆角底板只保留拱形标志，通知 / 托盘用原图 | `antigravity.png`、`resources/platforms/antigravity.png` |
+| DeepSeek | DeepSeek 官方 GitHub 组织 deepseek-ai 的头像（460px）；界面内白底转透明，通知 / 托盘用原图 | `deepseek.png`、`resources/platforms/deepseek.png` |
+| OpenRouter / Kimi / 硅基流动 | 各自官方 GitHub 组织（OpenRouterTeam / MoonshotAI / siliconflow）的头像；硅基流动白底转透明 | `openrouter.jpg`、`moonshot.jpg`、`siliconflow.png` |
+
+中转站、New API、自定义 JSON 接口没有统一的官方图标，显示名称首字母。
 
 图标商标归各自所有者，这里仅用于标识对应平台。要换图标直接替换上述文件（界面内的放 `src/renderer/src/assets/platforms/`，通知 / 托盘的放 `resources/platforms/`，PNG 建议 ≥128px）。
 
@@ -234,6 +264,10 @@ npm run dist
 - **刷新**：默认 5 分钟（最小 2 分钟）；429/5xx 退避为 间隔×2ⁿ，最长 30 分钟；Antigravity 未运行时每 2 分钟复查一次；手动刷新同一平台 15 秒内只生效一次。窗口隐藏时照常刷新。
 - **等价 API 价值的统计窗口**：只看近 30 天（再往前的记录不扫描，保证打开详情页时快）；同一平台 20 秒内重复打开不重新扫描。实测本机 Claude Code 108 MB 记录首次扫描约 0.3 秒，Codex 574 MB 约 0.7 秒，之后只读新增部分。
 - **Codex 恢复的会话**：恢复后累计用量从旧值继续，所以不能用累计值，改用逐次请求的记录；在第一条 `turn_context` 之前出现的请求，记到之后第一次出现的模型上。
+- **新增平台的范围**：DeepSeek 做成内置平台（本机 CC Switch 里配置了它）；阿里云百炼 Token Plan 没有用套餐 Key 查剩余 Credits 的公开接口（官方 CLI 要阿里云 AccessKey，套餐条款也禁止把套餐 Key 用在自动化脚本里），所以没做；Gemini CLI 查额度要用 Google OAuth，和"不碰 Google OAuth"的原则冲突，也没做。其它平台用"第三方平台"自己添加。
+- **DeepSeek 没有等价 API 价值**：它本来就是按量付费，余额就是真实花费；而且开发时访问不到 DeepSeek 文档核对最新价格，不在没核实的价格上折算。
+- **等价 API 价值只算走订阅的请求**：用 CC Switch 把 Claude Code / Codex 切到 DeepSeek、百炼等第三方时，本机记录里会出现别家的模型；Claude 只算 `claude-*` 模型，Codex 排除 DeepSeek / Qwen / GLM / Kimi 等第三方模型。
+- **余额平台没有历史曲线**：历史只记录额度窗口的百分比；余额平台的详情页显示余额明细。
 - **Codex 主题色**：按规格 `accent` = 冷白 #E8EAED、`accent2` = 薄荷绿 #10A37F；想让环形进度变绿可在 manifest 里互换。
 
 ---
@@ -253,9 +287,12 @@ src/main/net.ts                网络层（域名白名单、仅 127.0.0.1 放�
 src/main/store.ts              设置 + 历史 + 快照缓存（JSON）
 src/main/art.ts                art:// 协议、目录监听
 src/main/art-scan.ts           插画槽位扫描与 manifest 解析（main 与开发服务器共用）
+src/main/providers/balance.ts  DeepSeek 与第三方平台的余额查询
+src/main/providers/cc-switch.ts 只读 CC Switch 配置，按域名找成对的 Key
+src/main/secrets.ts            用户填写的 Key（safeStorage 加密）
 src/main/util.ts               脱敏、打码、宽容取值
 src/main/usage/                本机用量记录扫描（Claude Code / Codex / Antigravity）与等价 API 价值汇总
-src/shared/quota.ts            共享纯逻辑：主额度选择、倒计时格式、文案
+src/shared/quota.ts            共享纯逻辑：平台注册表、第三方平台类型、主额度选择、余额、倒计时格式、文案
 src/shared/pricing.ts          官方 API 价目表与折算逻辑
 src/preload/index.ts           contextBridge 暴露 window.quota
 src/renderer/                  React 界面（总览 / 详情 / 设置 / 迷你挂件）

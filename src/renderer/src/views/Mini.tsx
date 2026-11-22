@@ -1,5 +1,5 @@
 import { useRef, type CSSProperties, type PointerEvent } from 'react'
-import { PLATFORM_IDS } from '@shared/quota'
+import { balancePercent, formatMoney } from '@shared/quota'
 import { api } from '../api'
 import { ArtImage } from '../components/ArtImage'
 import { Bar } from '../components/Gauges'
@@ -46,9 +46,16 @@ export function MiniApp() {
       <button className={s.close} onClick={() => api.mini.close()} title="关闭挂件">
         <IconClose />
       </button>
-      {PLATFORM_IDS.map((p) => {
-        const v = buildView(p, state.snapshots[p], state.settings, art, now)
-        const dv = displayValue(v.primary, mode)
+      {state.platforms
+        .filter((info) => !info.hidden)
+        .slice(0, 8)
+        .map((info) => {
+        const p = info.id
+        const v = buildView(info, state.snapshots[p], state.settings, art, now)
+        const bal = v.balance
+        const dv = bal
+          ? balancePercent(bal) ?? (bal.amount == null || bal.amount > 0 ? 100 : 0)
+          : displayValue(v.primary, mode)
         // 有 avatar 图直接用；否则以 avatarFocus 为脸部中心从角色卡裁一块
         const avatarUrl = v.files.avatar ?? v.files.card
         const focus = v.files.avatar ? '50% 50%' : v.manifest.avatarFocus
@@ -63,21 +70,26 @@ export function MiniApp() {
                   crop={crop}
                   slot="avatar"
                   platform={p}
+                  kind={info.kind}
                   accent={v.manifest.accent}
                   letter={v.meta.name[0]}
                 />
               </div>
               <span className={s.badge}>
-                <PlatformIcon id={p} size={10} />
+                <PlatformIcon kind={info.kind} name={info.name} size={10} />
               </span>
             </div>
-            <span className={s.name}>{v.meta.en}</span>
+            <span className={s.name} title={v.meta.name}>{v.meta.en}</span>
             <Bar value={dv} color={v.color} height={5} />
             <span className={s.pct} style={{ color: v.color }}>
-              {dv == null ? '—' : `${fmtPct(dv)}%`}
+              {bal ? (balancePercent(bal) != null ? `${fmtPct(balancePercent(bal))}%` : '') : dv == null ? '—' : `${fmtPct(dv)}%`}
             </span>
-            <span className={s.cd}>
-              {v.snap.status === 'offline' && !v.hasData ? '未运行' : resetText(v.primary, now, v.copy).replace(/后(回满|重置)$/, '')}
+            <span className={s.cd} style={bal ? { color: v.color } : undefined}>
+              {bal
+                ? formatMoney(bal.amount ?? bal.used ?? null, bal.currency)
+                : v.snap.status === 'offline' && !v.hasData
+                  ? '未运行'
+                  : resetText(v.primary, now, v.copy).replace(/后(回满|重置)$/, '')}
             </span>
           </div>
         )

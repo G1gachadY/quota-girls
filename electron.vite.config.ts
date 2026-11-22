@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react'
 import type { Plugin } from 'vite'
 import { ART_FILE_RE, ART_MIME, findArtFile, scanArt } from './src/main/art-scan'
 import type { PlatformId } from './src/main/providers/types'
-import { PLATFORM_IDS } from './src/shared/quota'
+import { BUILTIN_IDS, defaultManifest } from './src/shared/quota'
 
 /**
  * 浏览器预览（没有 Electron、没有 art:// 协议）时，开发服务器在 /__art/ 下提供项目 art/ 里的插画：
@@ -24,12 +24,12 @@ function devArt(): Plugin {
         if (pathname === '/state.json') {
           res.setHeader('content-type', 'application/json; charset=utf-8')
           res.setHeader('cache-control', 'no-store')
-          res.end(JSON.stringify(scanArt(dirs, (p, file, v) => `/__art/${p}/${file}?v=${v}`)))
+          res.end(JSON.stringify(scanArt(dirs, BUILTIN_IDS, (p) => defaultManifest(p), (p, file, v) => `/__art/${p}/${file}?v=${v}`)))
           return
         }
         const [platform, file] = pathname.split('/').filter(Boolean)
         const found =
-          PLATFORM_IDS.includes(platform as PlatformId) && file && ART_FILE_RE.test(file)
+          (BUILTIN_IDS as string[]).includes(platform) && file && ART_FILE_RE.test(file)
             ? findArtFile(dirs, platform as PlatformId, file)
             : null
         if (!found) return next()

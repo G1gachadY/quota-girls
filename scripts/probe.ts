@@ -3,7 +3,7 @@
  * 作为 Electron main 进程运行（与应用同一套网络栈：系统代理、Chromium 证书校验）。
  *
  *   npm run probe                 # 三个平台
- *   npm run probe -- claude       # 只探测某个平台
+ *   npm run probe -- claude       # 只探测某个平台（claude / codex / antigravity / deepseek / 自定义平台 id）
  *   npm run probe -- value        # 打印三个平台本机记录按官方 API 定价折算的结果（可加平台名）
  */
 import { app } from 'electron'
@@ -11,9 +11,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { claudeWebDeps } from '../src/main/claude-web'
 import { fetchAntigravity } from '../src/main/providers/antigravity'
+import { fetchCustom, fetchDeepSeek } from '../src/main/providers/balance'
 import { fetchClaude } from '../src/main/providers/claude'
 import { fetchCodex } from '../src/main/providers/codex'
-import { getValueReport } from '../src/main/usage'
+import { getValueReport, type ValuePlatform } from '../src/main/usage'
 import { formatTokens, formatUsd, totalTokens } from '../src/shared/pricing'
 import type { AppSettings, PlatformId, ProviderResult } from '../src/main/providers/types'
 import { ProviderError, errorText } from '../src/main/util'
@@ -61,7 +62,7 @@ async function run(name: PlatformId, fn: () => Promise<ProviderResult>) {
   }
 }
 
-async function value(p: PlatformId) {
+async function value(p: ValuePlatform) {
   hr(`${p.toUpperCase()} · 等价 API 价值`)
   const t0 = Date.now()
   const r = await getValueReport(p, undefined)
@@ -84,9 +85,9 @@ async function value(p: PlatformId) {
 app.whenReady().then(async () => {
   const settings = loadSettings()
   const args = process.argv.slice(2)
-  const only = args.find((a) => ['claude', 'codex', 'antigravity'].includes(a))
+  const only = args.find((a) => ['claude', 'codex', 'antigravity', 'deepseek'].includes(a) || a.startsWith('x-'))
   if (args.includes('value')) {
-    for (const p of ['claude', 'codex', 'antigravity'] as PlatformId[]) if (!only || only === p) await value(p)
+    for (const p of ['claude', 'codex', 'antigravity'] as ValuePlatform[]) if (!only || only === p) await value(p)
     app.exit(0)
     return
   }
@@ -100,6 +101,10 @@ app.whenReady().then(async () => {
   if (!only || only === 'claude') await run('claude', () => fetchClaude(settings, claudeWebDeps))
   if (!only || only === 'codex') await run('codex', () => fetchCodex(settings))
   if (!only || only === 'antigravity') await run('antigravity', () => fetchAntigravity(settings))
+  if (!only || only === 'deepseek') await run('deepseek', () => fetchDeepSeek(settings))
+  for (const c of settings.customPlatforms) {
+    if (!only || only === c.id) await run(c.id, () => fetchCustom(c, settings))
+  }
   out('\n完成。以上内容已脱敏（token / cookie / 邮箱已打码）。')
   app.exit(0)
 })

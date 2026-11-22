@@ -28,6 +28,7 @@ const api: QuotaAPI = {
   claudeLogin: () => ipcRenderer.invoke('claude:login'),
   claudeSetSessionKey: (key) => ipcRenderer.invoke('claude:set-session-key', key),
   claudeLogout: () => ipcRenderer.invoke('claude:logout'),
+  setPlatformKey: (platform, key) => ipcRenderer.invoke('platform:set-key', platform, key),
 
   win: {
     minimize: () => ipcRenderer.send('win:minimize'),

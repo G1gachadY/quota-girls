@@ -16,3 +16,32 @@
   min-width: 0;
   height: 100%;
 }
+
+/* 超过 3 个平台：卡片至少 260px 宽，放不下时横向滚动（滚轮也能横滚） */
+.many {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(260px, 1fr);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x proximity;
+  scroll-padding: 0 16px;
+  padding-bottom: 10px;
+}
+
+.many .slot {
+  scroll-snap-align: start;
+}
+
+.many::-webkit-scrollbar {
+  height: 6px;
+}
+
+.many::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 3px;
+}
+
+.many::-webkit-scrollbar-track {
+  background: transparent;
+}

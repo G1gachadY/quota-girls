@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import type { PlatformId } from '../../../main/providers/types'
 import s from './ArtImage.module.css'
-import { PLATFORM_ICONS_LARGE } from './PlatformIcon'
+import { PLATFORM_ICONS_LARGE, type IconKind } from './PlatformIcon'
 
 type Slot = 'card' | 'hero' | 'avatar'
 
@@ -32,6 +32,7 @@ export function ArtImage({
   focus,
   slot,
   platform,
+  kind,
   accent,
   letter,
   layout = 'cover',
@@ -43,6 +44,8 @@ export function ArtImage({
   focus: string
   slot: Slot
   platform: PlatformId
+  /** 选水印图标用；没有官方图标的类型显示首字母 */
+  kind?: IconKind
   accent: string
   letter: string
   layout?: 'cover' | 'side'
@@ -97,10 +100,10 @@ export function ArtImage({
   const info = SLOT_INFO[slot]
   return (
     <div className={`${s.wrap} ${s.ph} ${s[slot]} ${className ?? ''}`} style={vars}>
-      {slot === 'avatar' ? (
-        <div className={s.letter}>{letter}</div>
+      {slot === 'avatar' || !(kind && PLATFORM_ICONS_LARGE[kind]) ? (
+        <div className={`${s.letter} ${slot !== 'avatar' ? s.bigLetter : ''}`}>{letter}</div>
       ) : (
-        <img className={s.logoMark} src={PLATFORM_ICONS_LARGE[platform]} alt="" draggable={false} />
+        <img className={s.logoMark} src={PLATFORM_ICONS_LARGE[kind]} alt="" draggable={false} />
       )}
       {slot !== 'avatar' && (
         <div className={s.safe}>

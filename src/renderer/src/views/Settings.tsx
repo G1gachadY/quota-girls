@@ -1,14 +1,23 @@
 import { motion } from 'motion/react'
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { PLATFORM_IDS, PLATFORM_META, formatAgo } from '@shared/quota'
-import type { AppSettings, AppState, ArtState, PlatformId, RawEntry } from '../../../main/providers/types'
+import { CUSTOM_KINDS, formatAgo, lowBalanceOf, newCustomId, normalizeCustom, normalizeCustomUrl } from '@shared/quota'
+import type {
+  AppSettings,
+  AppState,
+  ArtState,
+  CustomKind,
+  CustomPlatform,
+  PlatformId,
+  PlatformInfo,
+  RawEntry
+} from '../../../main/providers/types'
 import { api, isMock } from '../api'
 import { IconChevron, IconClose, IconFolder, IconImage, IconRefresh } from '../components/Icons'
 import { PlatformIcon } from '../components/PlatformIcon'
 import { SOURCE_LABELS } from '../model'
 import s from './Settings.module.css'
 
-const SOURCE_OPTIONS: Record<PlatformId, { value: string; label: string }[]> = {
+const SOURCE_OPTIONS: Record<string, { value: string; label: string }[]> = {
   claude: [
     { value: 'auto', label: '自动（OAuth → 网页）' },
     { value: 'oauth', label: 'OAuth（Claude Code 登录）' },
@@ -47,6 +56,9 @@ export function SettingsDrawer({
   const settings = state.settings
   const set = (patch: Partial<AppSettings>) => void api.setSettings(patch)
   const refs = useRef<Record<string, HTMLElement | null>>({})
+  /** null = 不显示表单；'new' = 添加；其它 = 编辑该 id */
+  const [form, setForm] = useState<string | null>(null)
+  const editing = form && form !== 'new' ? settings.customPlatforms.find((c) => c.id === form) ?? null : null
   useEffect(() => {
     if (focus) refs.current[focus]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [focus])
@@ -81,11 +93,22 @@ export function SettingsDrawer({
           {isMock && <div className={s.mock}>浏览器预览模式：显示的是假数据，设置不会保存。</div>}
 
           <Group title="平台连接" en="PLATFORMS">
-            {PLATFORM_IDS.map((p) => (
-              <div key={p} ref={(el) => (refs.current[p] = el)}>
-                <PlatformBlock p={p} state={state} art={art} />
+            {state.platforms.map((info) => (
+              <div key={info.id} ref={(el) => (refs.current[info.id] = el)}>
+                {form === info.id && editing ? (
+                  <CustomForm settings={settings} editing={editing} onDone={() => setForm(null)} />
+                ) : (
+                  <PlatformBlock info={info} state={state} art={art} onEdit={() => setForm(info.id)} />
+                )}
               </div>
             ))}
+            {form === 'new' ? (
+              <CustomForm settings={settings} editing={null} onDone={() => setForm(null)} />
+            ) : (
+              <button className={s.addBtn} onClick={() => setForm('new')}>
+                ＋ 添加第三方平台（中转站 / OpenRouter / Kimi / 硅基流动 / 自定义接口）
+              </button>
+            )}
           </Group>
 
           <Group title="刷新与显示" en="GENERAL">
@@ -176,7 +199,7 @@ export function SettingsDrawer({
               </button>
             </div>
             <p className={s.help}>
-              每个平台一个子目录（claude / codex / antigravity）：card 竖版 1024×1536、hero 横版 1536×1024（png / webp / jpg）。可选
+              每个平台一个子目录（claude / codex / antigravity / deepseek，第三方平台为它的 id）：card 竖版 1024×1536、hero 横版 1536×1024（png / webp / jpg）。可选
               avatar，以及体力紧张 / 耗尽差分 card-low、card-empty、hero-low、hero-empty——差分只画一种方向也行，另一处会自动借用。构图焦点在
               manifest.json 的 cardFocus / heroFocus / avatarFocus（及 cardLowFocus 等）里调整。保存文件后自动生效，无需重启。
             </p>
@@ -194,96 +217,153 @@ export function SettingsDrawer({
   )
 }
 
-function PlatformBlock({ p, state, art }: { p: PlatformId; state: AppState; art: ArtState }) {
+// ───────────────────────── 平台 ─────────────────────────
+
+const KEY_SOURCE_LABEL: Record<string, string> = {
+  manual: '已保存（加密存储在本机）',
+  'cc-switch': '自动读取 CC Switch 里的 DeepSeek 供应商',
+  env: '来自环境变量 DEEPSEEK_API_KEY'
+}
+
+function PlatformBlock({ info, state, art, onEdit }: { info: PlatformInfo; state: AppState; art: ArtState; onEdit: () => void }) {
+  const p = info.id
   const snap = state.snapshots[p]
   const settings = state.settings
-  const accent = art[p].manifest.accent
+  const accent = art[p]?.manifest.accent ?? settings.customPlatforms.find((c) => c.id === p)?.accent ?? '#7C8BFF'
   const refreshing = state.refreshing.includes(p)
   const [rawOpen, setRawOpen] = useState(false)
   const [raw, setRaw] = useState<RawEntry[] | null>(null)
   const [keyInput, setKeyInput] = useState('')
   const [keyMsg, setKeyMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [showKey, setShowKey] = useState(false)
+  const [confirmDel, setConfirmDel] = useState(false)
 
   useEffect(() => {
     if (rawOpen) api.getRaw(p).then(setRaw)
-  }, [rawOpen, p, snap.fetchedAt])
+  }, [rawOpen, p, snap?.fetchedAt])
 
-  const windows = snap.windows
-  const rule = settings.primaryRule[p]
+  const windows = snap?.windows ?? []
+  const rule = settings.primaryRule[p] ?? 'tightest'
+  const custom = settings.customPlatforms.find((c) => c.id === p)
+  const isQuota = p === 'claude' || p === 'codex' || p === 'antigravity'
+  const needsKey = p === 'deepseek' || !!custom
+  const currency = snap?.balance?.currency ?? (custom?.kind === 'openai-billing' || custom?.kind === 'newapi' || custom?.kind === 'openrouter' ? 'USD' : 'CNY')
 
   return (
-    <div className={s.platform} style={{ '--accent': accent } as CSSProperties}>
+    <div className={`${s.platform} ${info.hidden ? s.pHidden : ''}`} style={{ '--accent': accent } as CSSProperties}>
       <div className={s.pHead}>
-        <PlatformIcon id={p} size={18} />
-        <span className={s.pName}>{PLATFORM_META[p].name}</span>
-        <span className={`${s.pill} ${s[`st_${snap.status}`] ?? ''}`}>{STATUS_LABEL[snap.status] ?? snap.status}</span>
+        <PlatformIcon kind={info.kind} name={info.name} size={18} />
+        <span className={s.pName}>{info.name}</span>
+        {info.hidden ? (
+          <span className={s.pill}>已隐藏</span>
+        ) : (
+          snap && <span className={`${s.pill} ${s[`st_${snap.status}`] ?? ''}`}>{STATUS_LABEL[snap.status] ?? snap.status}</span>
+        )}
         <span className={s.pMeta}>
-          {SOURCE_LABELS[snap.source] ?? snap.source} · {formatAgo(snap.fetchedAt)}
+          {snap ? `${SOURCE_LABELS[snap.source] ?? snap.source} · ${formatAgo(snap.fetchedAt)}` : custom ? CUSTOM_KINDS[custom.kind].label : ''}
         </span>
-        <button
-          className={`${s.iconBtn} ${refreshing ? s.spin : ''}`}
-          title="重新检查"
-          onClick={() => void api.refresh(p)}
-        >
-          <IconRefresh />
-        </button>
+        {!info.hidden && (
+          <button className={`${s.iconBtn} ${refreshing ? s.spin : ''}`} title="重新检查" onClick={() => void api.refresh(p)}>
+            <IconRefresh />
+          </button>
+        )}
       </div>
 
-      {snap.error && snap.status !== 'ok' && (
+      {!info.hidden && snap?.error && snap.status !== 'ok' && (
         <div className={s.err}>
           <b>{snap.error.message}</b>
           <span>{snap.error.hint}</span>
         </div>
       )}
 
-      <Row label="数据源">
-        <select
-          className={s.select}
-          value={settings.sources[p]}
-          onChange={(e) => void api.setSettings({ sources: { ...settings.sources, [p]: e.target.value } as AppSettings['sources'] })}
-        >
-          {SOURCE_OPTIONS[p].map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+      <Row label="在总览显示" hint={info.hidden ? '隐藏的平台不显示、不刷新' : undefined}>
+        <Toggle
+          on={!info.hidden}
+          onChange={(on) =>
+            void api.setSettings({
+              hidden: on ? settings.hidden.filter((x) => x !== p) : [...settings.hidden, p]
+            })
+          }
+        />
       </Row>
 
-      <Row label="主额度">
-        <select
-          className={s.select}
-          value={windows.some((w) => w.id === rule) ? rule : 'tightest'}
-          onChange={(e) => void api.setSettings({ primaryRule: { ...settings.primaryRule, [p]: e.target.value } })}
-        >
-          <option value="tightest">最紧张的窗口（自动）</option>
-          {windows.map((w) => (
-            <option key={w.id} value={w.id}>
-              固定：{w.label}
-            </option>
-          ))}
-        </select>
-      </Row>
+      {isQuota && (
+        <>
+          <Row label="数据源">
+            <select
+              className={s.select}
+              value={settings.sources[p as keyof AppSettings['sources']]}
+              onChange={(e) => void api.setSettings({ sources: { ...settings.sources, [p]: e.target.value } as AppSettings['sources'] })}
+            >
+              {SOURCE_OPTIONS[p].map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </Row>
 
-      {p === 'claude' && (
-        <div className={s.claudeBox}>
-          <div className={s.btnRow}>
-            <button className={s.btn} onClick={() => void api.claudeLogin()}>
-              {state.claudeWebLoggedIn ? '重新登录 claude.ai' : '登录 claude.ai'}
+          <Row label="主额度">
+            <select
+              className={s.select}
+              value={windows.some((w) => w.id === rule) ? rule : 'tightest'}
+              onChange={(e) => void api.setSettings({ primaryRule: { ...settings.primaryRule, [p]: e.target.value } })}
+            >
+              <option value="tightest">最紧张的窗口（自动）</option>
+              {windows.map((w) => (
+                <option key={w.id} value={w.id}>
+                  固定：{w.label}
+                </option>
+              ))}
+            </select>
+          </Row>
+        </>
+      )}
+
+      {custom && (
+        <div className={s.customInfo}>
+          <span>{CUSTOM_KINDS[custom.kind].label}</span>
+          {custom.baseUrl && <span className={s.mono}>{custom.baseUrl}</span>}
+          <span className={s.customBtns}>
+            <button className={s.btnGhost} onClick={onEdit}>
+              编辑
             </button>
-            {state.claudeWebLoggedIn && (
-              <button className={s.btnGhost} onClick={() => void api.claudeLogout()}>
-                退出网页登录
+            {confirmDel ? (
+              <>
+                <button
+                  className={s.btnDanger}
+                  onClick={() =>
+                    void api.setSettings({
+                      customPlatforms: settings.customPlatforms.filter((c) => c.id !== p),
+                      hidden: settings.hidden.filter((x) => x !== p)
+                    })
+                  }
+                >
+                  确认删除
+                </button>
+                <button className={s.btnGhost} onClick={() => setConfirmDel(false)}>
+                  取消
+                </button>
+              </>
+            ) : (
+              <button className={s.btnGhost} onClick={() => setConfirmDel(true)}>
+                删除
               </button>
             )}
-            <span className={s.webState}>{state.claudeWebLoggedIn ? '● 网页已登录' : '○ 网页未登录'}</span>
+          </span>
+        </div>
+      )}
+
+      {needsKey && (
+        <div className={s.claudeBox}>
+          <div className={s.keyState}>
+            Key：{info.keySource ? KEY_SOURCE_LABEL[info.keySource] : p === 'deepseek' ? '没找到（CC Switch 里也没有 DeepSeek 供应商）' : '还没有填'}
           </div>
           <div className={s.keyRow}>
             <input
               className={s.input}
               type={showKey ? 'text' : 'password'}
-              placeholder="或粘贴 sessionKey（sk-ant- 开头）"
+              placeholder={custom ? CUSTOM_KINDS[custom.kind].keyLabel : '填写后优先使用，覆盖 CC Switch 里的 Key'}
               value={keyInput}
               onChange={(e) => setKeyInput(e.target.value)}
               spellCheck={false}
@@ -296,35 +376,265 @@ function PlatformBlock({ p, state, art }: { p: PlatformId; state: AppState; art:
               className={s.btn}
               disabled={!keyInput.trim()}
               onClick={async () => {
-                const r = await api.claudeSetSessionKey(keyInput)
+                const r = await api.setPlatformKey(p, keyInput.trim())
                 setKeyMsg({ ok: r.ok, text: r.message })
                 if (r.ok) setKeyInput('')
               }}
             >
               保存
             </button>
+            {info.keySource === 'manual' && (
+              <button
+                className={s.btnGhost}
+                onClick={async () => {
+                  const r = await api.setPlatformKey(p, null)
+                  setKeyMsg({ ok: r.ok, text: r.message })
+                }}
+              >
+                清除
+              </button>
+            )}
           </div>
           {keyMsg && <div className={keyMsg.ok ? s.okMsg : s.errMsg}>{keyMsg.text}</div>}
-          <p className={s.help}>
-            登录窗口使用独立的浏览器分区，cookie 只保存在本程序里。Google 账号可能拒绝在内嵌窗口登录，可改用邮箱登录或粘贴 sessionKey（浏览器开发者工具 → Application → Cookies → claude.ai → sessionKey）。
-          </p>
+          <p className={s.help}>Key 用 Windows 账户加密保存，只在本程序的后台进程里使用，只发往这个平台自己的地址。</p>
         </div>
       )}
 
-      <button className={s.rawToggle} onClick={() => setRawOpen((v) => !v)}>
-        <IconChevron className={rawOpen ? s.rot : ''} /> 原始响应（已脱敏）
-      </button>
-      {rawOpen && (
-        <pre className={s.raw}>
-          {raw == null
-            ? '读取中…'
-            : raw.length === 0
-              ? '还没有请求记录，点右上角 ⟳ 重新检查。'
-              : raw
-                  .map((r) => `── ${r.label}${r.status != null ? ` · HTTP ${r.status}` : ''}\n${JSON.stringify(r.body, null, 2)}`)
-                  .join('\n\n')}
-        </pre>
+      {needsKey && (
+        <Row label="余额提醒线" hint={`余额低于它时卡片变红并通知（${currency}，0 = 不提醒）`}>
+          <input
+            className={`${s.input} ${s.numInput}`}
+            type="number"
+            min={0}
+            step={1}
+            defaultValue={lowBalanceOf(settings, p)}
+            onBlur={(e) => {
+              const n = Number(e.target.value)
+              if (Number.isFinite(n) && n >= 0) void api.setSettings({ lowBalance: { ...settings.lowBalance, [p]: n } })
+            }}
+          />
+        </Row>
       )}
+
+      {p === 'claude' && <ClaudeLogin state={state} />}
+
+      {!info.hidden && (
+        <>
+          <button className={s.rawToggle} onClick={() => setRawOpen((v) => !v)}>
+            <IconChevron className={rawOpen ? s.rot : ''} /> 原始响应（已脱敏）
+          </button>
+          {rawOpen && (
+            <pre className={s.raw}>
+              {raw == null
+                ? '读取中…'
+                : raw.length === 0
+                  ? '还没有请求记录，点右上角 ⟳ 重新检查。'
+                  : raw
+                      .map((r) => `── ${r.label}${r.status != null ? ` · HTTP ${r.status}` : ''}\n${JSON.stringify(r.body, null, 2)}`)
+                      .join('\n\n')}
+            </pre>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+function ClaudeLogin({ state }: { state: AppState }) {
+  const [keyInput, setKeyInput] = useState('')
+  const [keyMsg, setKeyMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [showKey, setShowKey] = useState(false)
+  return (
+    <div className={s.claudeBox}>
+      <div className={s.btnRow}>
+        <button className={s.btn} onClick={() => void api.claudeLogin()}>
+          {state.claudeWebLoggedIn ? '重新登录 claude.ai' : '登录 claude.ai'}
+        </button>
+        {state.claudeWebLoggedIn && (
+          <button className={s.btnGhost} onClick={() => void api.claudeLogout()}>
+            退出网页登录
+          </button>
+        )}
+        <span className={s.webState}>{state.claudeWebLoggedIn ? '● 网页已登录' : '○ 网页未登录'}</span>
+      </div>
+      <div className={s.keyRow}>
+        <input
+          className={s.input}
+          type={showKey ? 'text' : 'password'}
+          placeholder="或粘贴 sessionKey（sk-ant- 开头）"
+          value={keyInput}
+          onChange={(e) => setKeyInput(e.target.value)}
+          spellCheck={false}
+          autoComplete="off"
+        />
+        <button className={s.btnGhost} onClick={() => setShowKey((v) => !v)}>
+          {showKey ? '隐藏' : '显示'}
+        </button>
+        <button
+          className={s.btn}
+          disabled={!keyInput.trim()}
+          onClick={async () => {
+            const r = await api.claudeSetSessionKey(keyInput)
+            setKeyMsg({ ok: r.ok, text: r.message })
+            if (r.ok) setKeyInput('')
+          }}
+        >
+          保存
+        </button>
+      </div>
+      {keyMsg && <div className={keyMsg.ok ? s.okMsg : s.errMsg}>{keyMsg.text}</div>}
+      <p className={s.help}>
+        登录窗口使用独立的浏览器分区，cookie 只保存在本程序里。Google 账号可能拒绝在内嵌窗口登录，可改用邮箱登录或粘贴 sessionKey（浏览器开发者工具 → Application → Cookies → claude.ai → sessionKey）。
+      </p>
+    </div>
+  )
+}
+
+/** 添加 / 编辑第三方平台 */
+function CustomForm({
+  settings,
+  editing,
+  onDone
+}: {
+  settings: AppSettings
+  editing: CustomPlatform | null
+  onDone: () => void
+}) {
+  const [kind, setKind] = useState<CustomKind>(editing?.kind ?? 'openai-billing')
+  const [name, setName] = useState(editing?.name ?? '')
+  const [baseUrl, setBaseUrl] = useState(editing?.baseUrl ?? '')
+  const [userId, setUserId] = useState(editing?.userId ?? '')
+  const [remainingPath, setRemainingPath] = useState(editing?.remainingPath ?? '')
+  const [totalPath, setTotalPath] = useState(editing?.totalPath ?? '')
+  const [unit, setUnit] = useState(editing?.unit ?? '')
+  const [accent, setAccent] = useState(editing?.accent ?? CUSTOM_KINDS[editing?.kind ?? 'openai-billing'].accent)
+  const [key, setKey] = useState('')
+  const [err, setErr] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const info = CUSTOM_KINDS[kind]
+
+  const save = async () => {
+    setErr(null)
+    const cp = normalizeCustom({
+      id: editing?.id ?? newCustomId(),
+      kind,
+      name: name.trim() || info.label,
+      baseUrl,
+      userId,
+      remainingPath,
+      totalPath,
+      unit,
+      accent
+    })
+    if (!cp) {
+      setErr(
+        info.url && !normalizeCustomUrl(baseUrl)
+          ? '地址要以 https:// 开头（本机地址可以用 http://localhost）'
+          : info.needsPaths
+            ? '剩余字段路径只能包含字母、数字、. _ [ ]，例如 data.balance'
+            : '填写有误'
+      )
+      return
+    }
+    if (!editing && kind !== 'json' && !key.trim()) {
+      setErr(`请填写${info.keyLabel}`)
+      return
+    }
+    setBusy(true)
+    const list = editing
+      ? settings.customPlatforms.map((c) => (c.id === cp.id ? cp : c))
+      : [...settings.customPlatforms, cp]
+    await api.setSettings({ customPlatforms: list })
+    if (key.trim()) {
+      const r = await api.setPlatformKey(cp.id, key.trim())
+      if (!r.ok) {
+        setBusy(false)
+        setErr(r.message)
+        return
+      }
+    }
+    setBusy(false)
+    onDone()
+  }
+
+  return (
+    <div className={s.customForm}>
+      <div className={s.formTitle}>{editing ? `编辑 ${editing.name}` : '添加第三方平台'}</div>
+      <Row label="类型" hint={info.hint}>
+        <select
+          className={s.select}
+          value={kind}
+          disabled={!!editing}
+          onChange={(e) => {
+            const k = e.target.value as CustomKind
+            setKind(k)
+            setAccent(CUSTOM_KINDS[k].accent)
+          }}
+        >
+          {(Object.keys(CUSTOM_KINDS) as CustomKind[]).map((k) => (
+            <option key={k} value={k}>
+              {CUSTOM_KINDS[k].label}
+            </option>
+          ))}
+        </select>
+      </Row>
+      <Row label="名称">
+        <input className={s.input} value={name} placeholder={info.label} maxLength={24} onChange={(e) => setName(e.target.value)} />
+      </Row>
+      {info.url && (
+        <Row label={info.url.label}>
+          <input
+            className={s.input}
+            value={baseUrl}
+            placeholder={info.url.placeholder}
+            spellCheck={false}
+            onChange={(e) => setBaseUrl(e.target.value)}
+          />
+        </Row>
+      )}
+      {info.needsUserId && (
+        <Row label="用户 ID" hint="个人设置页里的数字 ID">
+          <input className={s.input} value={userId} spellCheck={false} onChange={(e) => setUserId(e.target.value)} />
+        </Row>
+      )}
+      {info.needsPaths && (
+        <>
+          <Row label="剩余字段" hint="例如 data.balance、data.items[0].remain">
+            <input className={s.input} value={remainingPath} spellCheck={false} onChange={(e) => setRemainingPath(e.target.value)} />
+          </Row>
+          <Row label="总额字段（可选）">
+            <input className={s.input} value={totalPath} spellCheck={false} onChange={(e) => setTotalPath(e.target.value)} />
+          </Row>
+          <Row label="单位（可选）" hint="CNY / USD / 次 …">
+            <input className={`${s.input} ${s.numInput}`} value={unit} maxLength={8} onChange={(e) => setUnit(e.target.value)} />
+          </Row>
+        </>
+      )}
+      <Row label={editing ? `${info.keyLabel}（留空不改）` : info.keyLabel}>
+        <input
+          className={s.input}
+          type="password"
+          value={key}
+          spellCheck={false}
+          autoComplete="off"
+          onChange={(e) => setKey(e.target.value)}
+        />
+      </Row>
+      <Row label="主题色">
+        <input className={s.color} type="color" value={accent} onChange={(e) => setAccent(e.target.value)} />
+      </Row>
+      {err && <div className={s.errMsg}>{err}</div>}
+      <div className={s.btnRow}>
+        <button className={s.btn} disabled={busy} onClick={() => void save()}>
+          {editing ? '保存' : '添加'}
+        </button>
+        <button className={s.btnGhost} onClick={onDone}>
+          取消
+        </button>
+      </div>
+      <p className={s.help}>
+        Key 用 Windows 账户加密保存在本机，只在后台进程里使用，只会发往这个平台自己的域名{info.url ? '（就是上面填的地址）' : `（${info.host}）`}。
+      </p>
     </div>
   )
 }

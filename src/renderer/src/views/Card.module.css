@@ -337,6 +337,18 @@
   transition: color 0.4s;
 }
 
+/* 余额金额比百分比长，字号小一些 */
+.bigMoney {
+  font-size: clamp(26px, 9cqw, 40px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.moneyRow {
+  grid-template-columns: minmax(40px, 26%) 1fr auto;
+}
+
 .pct {
   font-size: 20px;
   font-weight: 500;

@@ -4,11 +4,12 @@
  * 插画取自开发服务器的 /__art/（项目 art/ 目录）。
  */
 import { PRICING_CHECKED_AT, aggregateValue, valueRanges } from '@shared/pricing'
-import { DEFAULT_MANIFESTS, DEFAULT_SETTINGS, PLATFORM_IDS, normalizeSettings } from '@shared/quota'
+import { BUILTIN_IDS, DEFAULT_MANIFESTS, DEFAULT_SETTINGS, isBuiltin, normalizeSettings, platformList } from '@shared/quota'
 import type {
   AppSettings,
   AppState,
   ArtState,
+  CustomPlatform,
   HistorySeries,
   PlatformId,
   PlatformSnapshot,
@@ -36,7 +37,7 @@ function scenario(): string {
   }
 }
 
-function snapshots(): Record<PlatformId, PlatformSnapshot> {
+function quotaSnapshots(): Record<PlatformId, PlatformSnapshot> {
   const now = new Date().toISOString()
   const sc = scenario()
   const claude: PlatformSnapshot = {
@@ -123,6 +124,67 @@ function snapshots(): Record<PlatformId, PlatformSnapshot> {
   return { claude, codex, antigravity }
 }
 
+/** 演示用的第三方平台（只在浏览器预览里出现） */
+const DEMO_CUSTOMS: CustomPlatform[] = [
+  { id: 'x-demo0001', kind: 'openai-billing', name: '我的中转站', baseUrl: 'https://api.example.com', accent: '#7C8BFF' },
+  { id: 'x-demo0002', kind: 'moonshot', name: 'Kimi', baseUrl: '', accent: '#E6E8EC' }
+]
+
+function snapshots(): Record<PlatformId, PlatformSnapshot> {
+  const sc = scenario()
+  const at = new Date(Date.now() - 2 * 60000).toISOString()
+  // tight = 低于提醒线，empty = 用完
+  const k = sc === 'empty' ? 0 : sc === 'tight' ? 0.04 : 1
+  const bal = (platform: PlatformId, source: string, balance: PlatformSnapshot['balance']): PlatformSnapshot => ({
+    platform,
+    status: 'ok',
+    source,
+    windows: [],
+    fetchedAt: at,
+    balance
+  })
+  const quota = quotaSnapshots()
+  if (sc === 'loading') {
+    const l = (p: PlatformId): PlatformSnapshot => ({ platform: p, status: 'loading', source: 'none', windows: [], fetchedAt: at })
+    return { ...quota, deepseek: l('deepseek'), 'x-demo0001': l('x-demo0001'), 'x-demo0002': l('x-demo0002') }
+  }
+  return {
+    ...quota,
+    deepseek:
+      sc === 'states'
+        ? {
+            platform: 'deepseek',
+            status: 'not_configured',
+            source: 'none',
+            windows: [],
+            fetchedAt: at,
+            error: { message: '没有找到 DeepSeek 的 API Key', hint: '在设置里填 Key，或在 CC Switch 里配置 DeepSeek 供应商' }
+          }
+        : bal('deepseek', 'cc-switch', {
+            amount: 86.42 * k,
+            currency: 'CNY',
+            parts: [
+              { label: '充值', amount: 80 * k },
+              { label: '赠送', amount: 6.42 * k }
+            ]
+          }),
+    'x-demo0001': bal('x-demo0001', 'openai-billing', {
+      amount: 12.5 * k,
+      total: 50,
+      used: 50 - 12.5 * k,
+      currency: 'USD'
+    }),
+    'x-demo0002': bal('x-demo0002', 'moonshot', {
+      amount: 23.1 * k,
+      currency: 'CNY',
+      parts: [
+        { label: '现金', amount: 15 * k },
+        { label: '代金券', amount: 8.1 * k }
+      ]
+    })
+  }
+}
+
 function fakeHistory(s: PlatformSnapshot): HistorySeries {
   const out: HistorySeries = { windows: {} }
   const now = Date.now()
@@ -198,14 +260,17 @@ const SCOPES: Record<PlatformId, Pick<ValueReport, 'scope' | 'caveat'>> = {
 }
 
 export function createMockApi(): QuotaAPI {
-  let settings: AppSettings = { ...DEFAULT_SETTINGS }
+  let settings: AppSettings = normalizeSettings({ ...DEFAULT_SETTINGS, customPlatforms: DEMO_CUSTOMS })
   const snaps = snapshots()
   const listeners = new Set<(s: AppState) => void>()
   const state = (): AppState => ({
+    platforms: platformList(settings, (id) => ({
+      keySource: id === 'deepseek' ? 'cc-switch' : isBuiltin(id) ? undefined : 'manual'
+    })),
     snapshots: snaps,
     settings,
     refreshing: [],
-    nextRefreshAt: { claude: null, codex: null, antigravity: null },
+    nextRefreshAt: {},
     claudeWebLoggedIn: false,
     version: 'mock'
   })
@@ -219,7 +284,7 @@ export function createMockApi(): QuotaAPI {
       /* 占位图 */
     }
     const a = {} as ArtState
-    for (const p of PLATFORM_IDS) a[p] = { manifest: DEFAULT_MANIFESTS[p], files: {} }
+    for (const p of BUILTIN_IDS) a[p] = { manifest: DEFAULT_MANIFESTS[p], files: {} }
     return a
   }
   return {
@@ -229,12 +294,13 @@ export function createMockApi(): QuotaAPI {
       return () => listeners.delete(cb)
     },
     refresh: async () => {
-      for (const p of PLATFORM_IDS) snaps[p] = { ...snaps[p], fetchedAt: new Date().toISOString() }
+      for (const p of Object.keys(snaps)) snaps[p] = { ...snaps[p], fetchedAt: new Date().toISOString() }
       emit()
     },
     getHistory: async (p) => fakeHistory(snaps[p]),
     getRaw: async (p) => [{ label: '假数据（浏览器预览）', at: new Date().toISOString(), body: snaps[p] }],
     getValue: async (p) => {
+      if (p !== 'claude' && p !== 'codex' && p !== 'antigravity') return null
       const events = scenario() === 'loading' ? [] : fakeUsage(p)
       return {
         platform: p,
@@ -248,6 +314,17 @@ export function createMockApi(): QuotaAPI {
     },
     setSettings: async (patch) => {
       settings = normalizeSettings({ ...settings, ...patch })
+      // 新加的第三方平台：预览里没有真实接口，显示"未连接"
+      for (const c of settings.customPlatforms) {
+        snaps[c.id] ??= {
+          platform: c.id,
+          status: 'not_configured',
+          source: 'none',
+          windows: [],
+          fetchedAt: new Date().toISOString(),
+          error: { message: '浏览器预览不会真的查询', hint: '在桌面版里添加后会用填写的 Key 查询余额' }
+        }
+      }
       emit()
       return settings
     },
@@ -258,6 +335,7 @@ export function createMockApi(): QuotaAPI {
     claudeLogin: async () => {},
     claudeSetSessionKey: async () => ({ ok: false, message: '浏览器预览模式不可用' }),
     claudeLogout: async () => {},
+    setPlatformKey: async () => ({ ok: false, message: '浏览器预览模式不可用' }),
     win: {
       minimize: () => {},
       toggleMaximize: () => {},

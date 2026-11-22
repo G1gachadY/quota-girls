@@ -3,19 +3,22 @@
  * - 官方域名（api.anthropic.com / claude.ai / chatgpt.com）走 Electron net.fetch：Chromium 网络栈，
  *   自动跟随系统代理，正常校验证书。
  * - 127.0.0.1 走 Node http/https：仅对 127.0.0.1 放行自签名证书（Antigravity 本地 language server）。
- * - 其它任何域名一律拒绝，保证 token 只发往对应官方域名。
+ * - 其它域名一律拒绝，保证 token 只发往对应官方域名；第三方平台的请求单独放行它自己的域名（allowHost），
+ *   也就是用户在设置里填的那个地址，Key 不会发往别处。
  */
 import http from 'node:http'
 import https from 'node:https'
 import { ProviderError } from './util'
 
-export const ALLOWED_HOSTS = new Set(['api.anthropic.com', 'claude.ai', 'chatgpt.com'])
+export const ALLOWED_HOSTS = new Set(['api.anthropic.com', 'claude.ai', 'chatgpt.com', 'api.deepseek.com'])
 
 export interface HttpOptions {
   method?: 'GET' | 'POST'
   headers?: Record<string, string>
   body?: string
   timeoutMs?: number
+  /** 只为这一次请求额外放行的域名（第三方平台自己的地址） */
+  allowHost?: string
 }
 
 export interface HttpResponse {
@@ -35,8 +38,9 @@ function tryJson(text: string): unknown {
 
 export async function httpRequest(url: string, opts: HttpOptions = {}): Promise<HttpResponse> {
   const u = new URL(url)
-  if (u.hostname === '127.0.0.1') return localRequest(u, opts)
-  if (u.protocol !== 'https:' || !ALLOWED_HOSTS.has(u.hostname)) {
+  if (u.hostname === '127.0.0.1' || u.hostname === 'localhost') return localRequest(u, opts)
+  const allowed = ALLOWED_HOSTS.has(u.hostname) || (!!opts.allowHost && u.hostname === opts.allowHost)
+  if (u.protocol !== 'https:' || !allowed) {
     throw new ProviderError(`拒绝请求非白名单域名：${u.hostname}`, 'config', '这是程序内部错误，请反馈')
   }
   const { net } = await import('electron')

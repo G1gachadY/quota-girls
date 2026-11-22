@@ -6,7 +6,7 @@
  */
 import { Notification } from 'electron'
 import fs from 'node:fs'
-import { PLATFORM_META, copyFor, effectiveWindow, formatCountdown } from '../shared/quota'
+import { copyFor, effectiveWindow, formatCountdown, formatMoney, lowBalanceOf } from '../shared/quota'
 import type { PlatformId, PlatformSnapshot } from './providers/types'
 import type { Store } from './store'
 
@@ -24,6 +24,8 @@ export function checkNotifications(
   prev: PlatformSnapshot | undefined,
   next: PlatformSnapshot,
   onClick: () => void,
+  /** 平台名（Claude / 用户起的名字） */
+  name: string,
   /** 平台官方图标 PNG（通知左侧大图标） */
   iconPath?: string
 ): void {
@@ -31,8 +33,22 @@ export function checkNotifications(
   if (next.status !== 'ok' || !Notification.isSupported()) return
   const s = store.settings.data
   const copy = copyFor(s.copyStyle)
-  const who = copy.char(PLATFORM_META[p].name)
+  const who = copy.char(name)
   const now = Date.now()
+
+  // 余额平台：低于阈值时每天最多提醒一次
+  const b = next.balance
+  const low = lowBalanceOf(s, p)
+  if (s.notifyLow && b && b.amount != null && low > 0 && b.amount < low) {
+    const day = new Date(now).toISOString().slice(0, 10)
+    if (store.markNotified(`lowbal:${p}:${day}`)) {
+      show(
+        b.amount <= 0 ? `${name} 余额已用完` : `${name} 余额只剩 ${formatMoney(b.amount, b.currency)}`,
+        `低于设置的提醒线 ${formatMoney(low, b.currency)}，记得充值`,
+        onClick
+      )
+    }
+  }
 
   for (const w of next.windows) {
     if (!w.known || w.usedPercent == null) continue

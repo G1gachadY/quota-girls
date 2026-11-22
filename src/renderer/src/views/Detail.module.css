@@ -15,6 +15,11 @@
   inset: 0 0 0 -40px;
 }
 
+/* 余额平台环中心：文字比百分比数字小 */
+.ringMoney {
+  font-size: 30px !important;
+}
+
 .dim {
   filter: saturate(0.3) brightness(0.75);
 }

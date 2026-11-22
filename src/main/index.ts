@@ -5,14 +5,24 @@
 import { BrowserWindow, Menu, Tray, app, ipcMain, nativeImage, screen, session, shell } from 'electron'
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import path from 'node:path'
-import { DEFAULT_SETTINGS, PLATFORM_IDS, PLATFORM_META, pickPrimary, remainingOf } from '../shared/quota'
-import { ensureEditableArtDir, getArtState, registerArtProtocol, registerArtScheme, watchArt } from './art'
+import {
+  DEFAULT_SETTINGS,
+  defaultManifest,
+  formatMoney,
+  isBuiltin,
+  platformList,
+  pickPrimary,
+  remainingOf
+} from '../shared/quota'
+import { configureArt, ensureEditableArtDir, getArtState, registerArtProtocol, registerArtScheme, watchArt } from './art'
 import { clearClaudeWeb, hasClaudeWebSession, openClaudeLogin, setClaudeSessionKey } from './claude-web'
 import { checkNotifications } from './notify'
-import type { AppSettings, AppState, PlatformId } from './providers/types'
+import { deepseekKeySource } from './providers/balance'
+import type { ActionResult, AppSettings, AppState, PlatformId, PlatformInfo } from './providers/types'
 import { Scheduler } from './scheduler'
 import { Store } from './store'
-import { getValueReport } from './usage'
+import { hasSecret, pruneSecrets, setSecret } from './secrets'
+import { getValueReport, isValuePlatform } from './usage'
 
 const APP_ID = 'com.quotagirls.app'
 const isDev = !app.isPackaged
@@ -34,6 +44,25 @@ let tray: Tray | null = null
 let quitting = false
 let claudeWebLoggedIn = false
 let stopWatch: (() => void) | null = null
+
+// ───────────────────────── 平台列表 ─────────────────────────
+
+/** 全部平台（含隐藏的）；Key 只报来源，不出 main */
+function platforms(): PlatformInfo[] {
+  return platformList(store.settings.data, (id) => {
+    if (id === 'deepseek') return { keySource: hasSecret('deepseek') ? 'manual' : deepseekKeySource }
+    if (isBuiltin(id)) return {}
+    return { keySource: hasSecret(id) ? 'manual' : null }
+  })
+}
+const allIds = (): PlatformId[] => platforms().map((p) => p.id)
+const visibleIds = (): PlatformId[] => platforms().filter((p) => !p.hidden).map((p) => p.id)
+const nameOf = (id: PlatformId): string => platforms().find((p) => p.id === id)?.name ?? id
+/** 平台图标 PNG（托盘 / 通知）：内置平台用自己的，自定义平台按类型找 */
+function iconFile(id: PlatformId): string {
+  const kind = isBuiltin(id) ? id : (store.settings.data.customPlatforms.find((c) => c.id === id)?.kind ?? 'json')
+  return resource(path.join('platforms', `${kind}.png`))
+}
 
 function resource(name: string): string {
   return isDev ? path.join(app.getAppPath(), 'resources', name) : path.join(process.resourcesPath, 'resources', name)
@@ -140,11 +169,13 @@ function showMain(): void {
 // ───────────────────────── 迷你挂件 ─────────────────────────
 
 const MINI_W = 360
-const MINI_H = 132
+/** 36px 边距 + 每行 32px，最多 8 行 */
+const miniHeight = (): number => 36 + Math.min(8, Math.max(1, visibleIds().length)) * 32
 
 function createMiniWindow(): BrowserWindow {
   const s = store.settings.data
   const wa = screen.getPrimaryDisplay().workArea
+  const MINI_H = miniHeight()
   let { x, y } = s.miniPosition ?? { x: wa.x + wa.width - MINI_W - 24, y: wa.y + wa.height - MINI_H - 24 }
   // 防止上次位置在已拔掉的显示器上
   const visible = screen.getAllDisplays().some(
@@ -195,7 +226,7 @@ function toggleMini(): void {
 let savePosTimer: NodeJS.Timeout | null = null
 function moveMini(x: number, y: number): void {
   if (!miniWin || miniWin.isDestroyed() || !Number.isFinite(x) || !Number.isFinite(y)) return
-  miniWin.setBounds({ x: Math.round(x), y: Math.round(y), width: MINI_W, height: MINI_H })
+  miniWin.setBounds({ x: Math.round(x), y: Math.round(y), width: MINI_W, height: miniHeight() })
   if (savePosTimer) clearTimeout(savePosTimer)
   savePosTimer = setTimeout(() => {
     if (miniWin && !miniWin.isDestroyed()) {
@@ -207,34 +238,38 @@ function moveMini(x: number, y: number): void {
 
 // ───────────────────────── 托盘 ─────────────────────────
 
+/** 托盘里每个平台的状态：额度平台显示剩余 %，余额平台显示金额 */
+function statusText(p: PlatformId): string {
+  const snap = scheduler.snapshots[p]
+  const b = snap?.balance
+  if (b && snap.windows.length === 0) return formatMoney(b.amount ?? b.used ?? null, b.currency)
+  const r = remainingOf(pickPrimary(snap, store.settings.data.primaryRule[p]))
+  return r == null ? '—' : `${Math.round(r)}%`
+}
+
 function trayTooltip(): string {
-  const s = store.settings.data
-  const parts = PLATFORM_IDS.map((p) => {
-    const w = pickPrimary(scheduler.snapshots[p], s.primaryRule[p])
-    const r = remainingOf(w)
-    return `${PLATFORM_META[p].name} ${r == null ? '—' : `${Math.round(r)}%`}`
-  })
+  const parts = visibleIds().map((p) => `${nameOf(p)} ${statusText(p)}`)
   return `额度娘 · 剩余\n${parts.join('  ')}`.slice(0, 127)
 }
 
-const trayIcons = new Map<PlatformId, Electron.NativeImage>()
+const trayIcons = new Map<string, Electron.NativeImage>()
 function platformTrayIcon(p: PlatformId): Electron.NativeImage | undefined {
-  if (!trayIcons.has(p)) {
-    const img = nativeImage.createFromPath(resource(path.join('platforms', `${p}.png`)))
-    trayIcons.set(p, img.isEmpty() ? img : img.resize({ width: 16, height: 16, quality: 'best' }))
+  const file = iconFile(p)
+  if (!trayIcons.has(file)) {
+    const img = nativeImage.createFromPath(file)
+    trayIcons.set(file, img.isEmpty() ? img : img.resize({ width: 16, height: 16, quality: 'best' }))
   }
-  const img = trayIcons.get(p)!
+  const img = trayIcons.get(file)!
   return img.isEmpty() ? undefined : img
 }
 
 function updateTrayMenu(): void {
   if (!tray) return
   tray.setToolTip(trayTooltip())
-  const s = store.settings.data
-  const statusItems: Electron.MenuItemConstructorOptions[] = PLATFORM_IDS.map((p) => {
-    const r = remainingOf(pickPrimary(scheduler.snapshots[p], s.primaryRule[p]))
+  const statusItems: Electron.MenuItemConstructorOptions[] = visibleIds().map((p) => {
+    const b = scheduler.snapshots[p]?.balance
     return {
-      label: `${PLATFORM_META[p].name}　剩余 ${r == null ? '—' : `${Math.round(r)}%`}`,
+      label: `${nameOf(p)}　${b ? '余额' : '剩余'} ${statusText(p)}`,
       icon: platformTrayIcon(p),
       click: showMain
     }
@@ -270,11 +305,12 @@ function createTray(): void {
 
 function buildState(): AppState {
   const nextRefreshAt = {} as Record<PlatformId, string | null>
-  for (const p of PLATFORM_IDS) {
+  for (const p of visibleIds()) {
     const t = scheduler.nextAt[p]
     nextRefreshAt[p] = t ? new Date(t).toISOString() : null
   }
   return {
+    platforms: platforms(),
     snapshots: scheduler.snapshots,
     settings: store.settings.data,
     refreshing: scheduler.refreshing,
@@ -318,10 +354,33 @@ function applySettings(prev: AppSettings, next: AppSettings): void {
     miniWin.setAlwaysOnTop(next.miniAlwaysOnTop)
   }
   if (prev.launchAtLogin !== next.launchAtLogin) applyLoginItem(next.launchAtLogin)
-  for (const p of PLATFORM_IDS) {
+  for (const p of ['claude', 'codex', 'antigravity'] as const) {
     if (prev.sources[p] !== next.sources[p]) void scheduler.refresh(p, false)
   }
   if (prev.maskEmail !== next.maskEmail) void scheduler.refreshAll(false)
+
+  // 平台增删 / 隐藏 / 改配置
+  const prevIds = new Set(prev.customPlatforms.map((c) => c.id))
+  const nextIds = new Set(next.customPlatforms.map((c) => c.id))
+  const removed = [...prevIds].filter((id) => !nextIds.has(id))
+  for (const id of removed) store.forget(id)
+  if (removed.length) pruneSecrets(new Set(['deepseek', ...nextIds]))
+  const listChanged =
+    JSON.stringify(prev.customPlatforms) !== JSON.stringify(next.customPlatforms) ||
+    JSON.stringify(prev.hidden) !== JSON.stringify(next.hidden)
+  if (listChanged) {
+    scheduler.sync()
+    // 配置改过的平台立刻重新查询
+    for (const c of next.customPlatforms) {
+      const old = prev.customPlatforms.find((x) => x.id === c.id)
+      if (old && JSON.stringify(old) !== JSON.stringify(c)) void scheduler.refreshFresh(c.id)
+    }
+    broadcast('art:changed', getArtState())
+    if (miniWin && !miniWin.isDestroyed()) {
+      const [x, y] = miniWin.getPosition()
+      miniWin.setBounds({ x, y, width: MINI_W, height: miniHeight() })
+    }
+  }
 }
 
 function applyLoginItem(on: boolean): void {
@@ -344,7 +403,7 @@ function registerIpc(): void {
       if (trusted(e)) fn(e, ...(args as A))
     })
   }
-  const isPlatform = (p: unknown): p is PlatformId => PLATFORM_IDS.includes(p as PlatformId)
+  const isPlatform = (p: unknown): p is PlatformId => typeof p === 'string' && allIds().includes(p)
 
   handle('state:get', () => buildState())
   handle('quota:refresh', (p?: unknown) =>
@@ -352,7 +411,26 @@ function registerIpc(): void {
   )
   handle('history:get', (p: unknown) => (isPlatform(p) ? store.getHistory(p) : { windows: {} }))
   handle('raw:get', (p: unknown) => (isPlatform(p) ? scheduler.raw[p] ?? [] : []))
-  handle('value:get', (p: unknown) => (isPlatform(p) ? getValueReport(p, scheduler.snapshots[p]) : null))
+  handle('value:get', (p: unknown) =>
+    typeof p === 'string' && isValuePlatform(p) ? getValueReport(p, scheduler.snapshots[p]) : null
+  )
+  handle('platform:set-key', (p: unknown, key: unknown): ActionResult => {
+    if (!isPlatform(p) || (isBuiltin(p) && p !== 'deepseek')) return { ok: false, message: '这个平台不需要 Key' }
+    if (key == null || key === '') {
+      setSecret(p, null)
+    } else {
+      const v = String(key).trim()
+      if (v.length < 8 || v.length > 400 || /\s/.test(v)) return { ok: false, message: 'Key 格式不对' }
+      try {
+        setSecret(p, v)
+      } catch (e) {
+        return { ok: false, message: (e as Error).message }
+      }
+    }
+    pushState()
+    void scheduler.refreshFresh(p)
+    return { ok: true, message: key ? '已保存（加密存储在本机）' : '已清除' }
+  })
   handle('settings:set', (patch: unknown) => {
     const clean: Partial<AppSettings> = {}
     if (patch && typeof patch === 'object') {
@@ -432,10 +510,11 @@ app.whenReady().then(() => {
 
   registerArtProtocol()
   store = new Store(app.getPath('userData'))
-  scheduler = new Scheduler(store)
+  configureArt(allIds, (p) => defaultManifest(p, store.settings.data))
+  scheduler = new Scheduler(store, visibleIds)
   scheduler.onChange(pushState)
   scheduler.onSnapshot((p, prev, next) => {
-    checkNotifications(store, p, prev, next, showMain, resource(path.join('platforms', `${p}.png`)))
+    checkNotifications(store, p, prev, next, showMain, nameOf(p), iconFile(p))
     if (p === 'claude') void refreshClaudeWebFlag()
     pushState()
   })

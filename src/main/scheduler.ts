@@ -2,9 +2,10 @@
  * 定时调度：默认 5 分钟（最小 2 分钟）；429/5xx 指数退避（最长 30 分钟）；
  * 任一平台出错不影响其它平台；失败时保留上次快照并标 stale。
  */
-import { PLATFORM_IDS } from '../shared/quota'
+import { isBuiltin } from '../shared/quota'
 import { claudeWebDeps } from './claude-web'
 import { fetchAntigravity } from './providers/antigravity'
+import { fetchCustom, fetchDeepSeek } from './providers/balance'
 import { fetchClaude } from './providers/claude'
 import { fetchCodex } from './providers/codex'
 import type { PlatformId, PlatformSnapshot, ProviderResult, RawEntry } from './providers/types'
@@ -28,9 +29,20 @@ export class Scheduler {
   private listeners: Listener[] = []
   private changeListeners: (() => void)[] = []
 
-  constructor(private store: Store) {
-    for (const p of PLATFORM_IDS) {
-      const cached = store.cache.data[p]
+  /** @param ids 当前要刷新的平台（不含隐藏的），每次调用都按最新设置计算 */
+  constructor(
+    private store: Store,
+    private ids: () => PlatformId[]
+  ) {
+    this.sync()
+  }
+
+  /** 平台增删 / 隐藏后调用：补上新平台的状态，清掉已删除的，新平台立即刷新 */
+  sync(): void {
+    const want = new Set(this.ids())
+    for (const p of want) {
+      if (this.snapshots[p]) continue
+      const cached = this.store.cache.data[p]
       // 启动时先显示上次快照（标 loading 之外的 stale），首次刷新后替换
       this.snapshots[p] = cached
         ? { ...cached, status: cached.status === 'ok' ? 'stale' : cached.status }
@@ -40,6 +52,15 @@ export class Scheduler {
       this.failures[p] = 0
       this.lastRun[p] = 0
     }
+    for (const p of Object.keys(this.snapshots)) {
+      if (want.has(p)) continue
+      delete this.snapshots[p]
+      delete this.raw[p]
+      delete this.nextAt[p]
+      delete this.failures[p]
+      delete this.lastRun[p]
+    }
+    if (this.timer) void this.tick()
   }
 
   onSnapshot(l: Listener): void {
@@ -73,23 +94,24 @@ export class Scheduler {
 
   private async tick(): Promise<void> {
     const now = Date.now()
-    for (const p of PLATFORM_IDS) if (now >= this.nextAt[p]) void this.refresh(p, false)
+    for (const p of this.ids()) if (now >= (this.nextAt[p] ?? 0)) void this.refresh(p, false)
   }
 
   async refreshAll(manual = true): Promise<void> {
-    await Promise.all(PLATFORM_IDS.map((p) => this.refresh(p, manual)))
+    await Promise.all(this.ids().map((p) => this.refresh(p, manual)))
   }
 
   /** 设置变化（例如刷新间隔）后重新排期 */
   reschedule(): void {
     const interval = this.store.settings.data.refreshMinutes * 60 * 1000
     const now = Date.now()
-    for (const p of PLATFORM_IDS) {
+    for (const p of this.ids()) {
       if (this.failures[p] === 0) this.nextAt[p] = Math.min(this.nextAt[p], now + interval)
     }
   }
 
   refresh(p: PlatformId, manual: boolean): Promise<void> {
+    if (!this.snapshots[p]) return Promise.resolve()
     const existing = this.inflight.get(p)
     if (existing) return existing
     // 手动刷新也保留一个很短的最小间隔，避免连点打爆接口
@@ -103,11 +125,22 @@ export class Scheduler {
     return job
   }
 
+  /** 等进行中的那次结束后再查一次（例如刚改了 Key / 配置，进行中的那次用的还是旧的） */
+  async refreshFresh(p: PlatformId): Promise<void> {
+    const existing = this.inflight.get(p)
+    if (existing) await existing
+    return this.refresh(p, false)
+  }
+
   private async fetchOne(p: PlatformId): Promise<ProviderResult> {
     const settings = this.store.settings.data
     if (p === 'claude') return fetchClaude(settings, claudeWebDeps)
     if (p === 'codex') return fetchCodex(settings)
-    return fetchAntigravity(settings)
+    if (p === 'antigravity') return fetchAntigravity(settings)
+    if (p === 'deepseek') return fetchDeepSeek(settings)
+    const custom = isBuiltin(p) ? undefined : settings.customPlatforms.find((c) => c.id === p)
+    if (!custom) throw new ProviderError('平台已被删除', 'config', '')
+    return fetchCustom(custom, settings)
   }
 
   private async run(p: PlatformId): Promise<void> {
@@ -141,14 +174,14 @@ export class Scheduler {
       this.store.addHistory(next)
       this.failures[p] = 0
       this.nextAt[p] = now + interval
-    } else if (next.status === 'stale' && next.windows.length > 0) {
+    } else if (next.status === 'stale' && hasData(next)) {
       // 例如 Codex 本地会话日志：数据是旧的，但可以显示
       if (!lastGood || Date.parse(lastGood.fetchedAt) < Date.parse(next.fetchedAt)) this.store.setCache(next)
       this.failures[p] = 0
       this.nextAt[p] = now + interval
     } else {
       // 失败：保留上次快照
-      if (lastGood && lastGood.windows.length > 0 && next.status !== 'not_configured') {
+      if (lastGood && hasData(lastGood) && next.status !== 'not_configured') {
         next = {
           ...lastGood,
           status: next.status === 'error' ? 'stale' : next.status,
@@ -166,7 +199,14 @@ export class Scheduler {
       }
     }
 
+    // 刷新期间平台被删除 / 隐藏：丢弃结果
+    if (!this.snapshots[p]) return
     this.snapshots[p] = next
     for (const l of this.listeners) l(p, prev, next)
   }
+}
+
+/** 有可显示的数据：额度窗口或余额 */
+function hasData(s: PlatformSnapshot): boolean {
+  return s.windows.length > 0 || !!s.balance
 }

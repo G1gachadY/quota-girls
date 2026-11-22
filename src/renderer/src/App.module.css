@@ -44,6 +44,9 @@
 
 .tabs {
   display: inline-flex;
+  max-width: 56vw;
+  overflow-x: auto;
+  scrollbar-width: none;
   padding: 3px;
   border-radius: 10px;
   background: rgba(10, 12, 18, 0.55);
@@ -52,6 +55,7 @@
 }
 
 .tabs button {
+  flex: none;
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -64,6 +68,17 @@
   transition:
     background 0.2s,
     color 0.2s;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tabName {
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tabs button:hover {

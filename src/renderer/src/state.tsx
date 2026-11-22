@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { DEFAULT_MANIFESTS, PLATFORM_IDS } from '@shared/quota'
+import { BUILTIN_IDS, DEFAULT_MANIFESTS } from '@shared/quota'
 import type { AppState, ArtState, HistorySeries, PlatformId, ValueReport } from '../../main/providers/types'
 import { api } from './api'
 
@@ -10,7 +10,7 @@ interface Data {
 
 const emptyArt = (): ArtState => {
   const a = {} as ArtState
-  for (const p of PLATFORM_IDS) a[p] = { manifest: DEFAULT_MANIFESTS[p], files: {} }
+  for (const p of BUILTIN_IDS) a[p] = { manifest: DEFAULT_MANIFESTS[p], files: {} }
   return a
 }
 

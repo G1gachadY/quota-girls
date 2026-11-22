@@ -3,7 +3,11 @@
  * 注意：本文件必须保持"纯类型"（不 import 任何 Node/Electron 模块），renderer 会 import type 它。
  */
 
-export type PlatformId = 'claude' | 'codex' | 'antigravity'
+/** 内置平台 */
+export type BuiltinId = 'claude' | 'codex' | 'antigravity' | 'deepseek'
+
+/** 平台 id：内置平台，或自定义第三方平台（'x-' 开头） */
+export type PlatformId = string
 
 export interface QuotaWindow {
   /** 'five_hour' / 'seven_day' / 'gemini-5h' … */
@@ -30,6 +34,20 @@ export type SnapshotStatus =
 
 export type SourceId = 'oauth' | 'web' | 'api' | 'rpc' | 'local-log' | 'local-ls' | 'none'
 
+/** 预付费余额（DeepSeek / 中转站 / OpenRouter 等按量付费平台） */
+export interface Balance {
+  /** 剩余；不限额度的中转站令牌为 null */
+  amount: number | null
+  /** 'CNY' / 'USD' / 自定义单位 */
+  currency: string
+  /** 总额（知道时用 剩余/总额 算百分比） */
+  total?: number | null
+  /** 已用 */
+  used?: number | null
+  /** 明细：充值 / 赠送 / 代金券 … */
+  parts?: { label: string; amount: number }[]
+}
+
 export interface PlatformSnapshot {
   platform: PlatformId
   status: SnapshotStatus
@@ -42,6 +60,8 @@ export interface PlatformSnapshot {
   windows: QuotaWindow[]
   /** 已格式化文本 */
   extras?: { credits?: string; extraUsage?: string }
+  /** 按量付费平台的余额（没有额度窗口） */
+  balance?: Balance
   fetchedAt: string
   /** hint 用中文告诉用户怎么修 */
   error?: { message: string; hint: string }
@@ -77,10 +97,54 @@ export interface SourcePrefs {
 /** 'tightest' = 最紧张的窗口；其它字符串 = 固定某个窗口 id */
 export type PrimaryRule = 'tightest' | string
 
+/** 自定义第三方平台的查询方式 */
+export type CustomKind = 'openai-billing' | 'newapi' | 'openrouter' | 'moonshot' | 'siliconflow' | 'deepseek' | 'json'
+
+/** 自定义第三方平台（Key 不在这里：加密保存在 main 进程，renderer 永远拿不到） */
+export interface CustomPlatform {
+  /** 'x-' + 随机字符 */
+  id: string
+  name: string
+  kind: CustomKind
+  /** 中转站根地址 / JSON 接口完整地址；官方厂商类型固定用官方地址，忽略此项 */
+  baseUrl: string
+  /** New API：用户 ID */
+  userId?: string
+  /** JSON：剩余 / 总额字段路径（如 data.balance），单位 */
+  remainingPath?: string
+  totalPath?: string
+  unit?: string
+  accent: string
+}
+
+/** 平台列表里的一项（main 计算后放进 AppState） */
+export interface PlatformInfo {
+  id: PlatformId
+  name: string
+  /** 卡片标题：CLAUDE / 用户起的名字 */
+  en: string
+  /** 编号 01、02 … */
+  no: string
+  builtin: boolean
+  /** 自定义平台的类型；内置平台为自身 id（用于选图标） */
+  kind: CustomKind | BuiltinId
+  hidden: boolean
+  /** 支持"等价 API 价值" */
+  value: boolean
+  /** 需要 Key 的平台：Key 从哪来（只给来源，不给 Key 本身） */
+  keySource?: 'manual' | 'cc-switch' | 'env' | null
+}
+
 export interface AppSettings {
   /** 刷新间隔（分钟），最小 2 */
   refreshMinutes: number
   primaryRule: Record<PlatformId, PrimaryRule>
+  /** 自定义第三方平台 */
+  customPlatforms: CustomPlatform[]
+  /** 隐藏的平台：不显示、不刷新 */
+  hidden: PlatformId[]
+  /** 余额低于该值时提醒（按各平台自己的货币单位），0 = 不提醒 */
+  lowBalance: Record<PlatformId, number>
   /** 默认显示"剩余"（像血条） */
   displayMode: 'remaining' | 'used'
   /** 文案风格：游戏化（体力 / 后回满） ↔ 标准（剩余额度 / 后重置） */
@@ -234,6 +298,8 @@ export interface ValueReport {
 // ───────────────────────── IPC ─────────────────────────
 
 export interface AppState {
+  /** 全部平台（含隐藏的），按显示顺序 */
+  platforms: PlatformInfo[]
   snapshots: Record<PlatformId, PlatformSnapshot>
   settings: AppSettings
   refreshing: PlatformId[]
@@ -254,7 +320,7 @@ export interface QuotaAPI {
   getHistory(platform: PlatformId): Promise<HistorySeries>
   getRaw(platform: PlatformId): Promise<RawEntry[]>
   /** 按官方 API 定价折算本机记录里的用量 */
-  getValue(platform: PlatformId): Promise<ValueReport>
+  getValue(platform: PlatformId): Promise<ValueReport | null>
   setSettings(patch: Partial<AppSettings>): Promise<AppSettings>
 
   getArt(): Promise<ArtState>
@@ -265,6 +331,8 @@ export interface QuotaAPI {
   claudeLogin(): Promise<void>
   claudeSetSessionKey(key: string): Promise<ActionResult>
   claudeLogout(): Promise<void>
+  /** 保存 / 清除某个平台的 API Key（加密保存在本机；传 null 清除） */
+  setPlatformKey(platform: PlatformId, key: string | null): Promise<ActionResult>
 
   win: {
     minimize(): void

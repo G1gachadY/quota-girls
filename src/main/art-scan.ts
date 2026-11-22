@@ -4,7 +4,6 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { DEFAULT_MANIFESTS, PLATFORM_IDS } from '../shared/quota'
 import type { ArtFiles, ArtManifest, ArtState, PlatformId } from './providers/types'
 
 /** 槽位 → 文件名（不含扩展名） */
@@ -60,8 +59,7 @@ function findSlot(dirs: string[], platform: PlatformId, base: string): { name: s
 const COLOR_RE = /^(#[0-9a-f]{3,8}|rgba?\([^)]*\)|hsla?\([^)]*\))$/i
 const FOCUS_RE = /^[\d.]+%?\s+[\d.]+%?$|^(center|top|bottom|left|right)(\s+\w+)?$/i
 
-export function readManifest(dirs: string[], platform: PlatformId): ArtManifest {
-  const def = DEFAULT_MANIFESTS[platform]
+export function readManifest(dirs: string[], platform: PlatformId, def: ArtManifest): ArtManifest {
   const file = findArtFile(dirs, platform, 'manifest.json')
   if (!file) return def
   try {
@@ -88,16 +86,25 @@ export function readManifest(dirs: string[], platform: PlatformId): ArtManifest 
   }
 }
 
-/** 扫描全部平台的插画；urlOf 决定文件对外的地址（art:// 或 /__art/） */
-export function scanArt(dirs: string[], urlOf: (platform: PlatformId, file: string, mtime: number) => string): ArtState {
+/** 插画目录名只允许这些字符（平台 id） */
+export const ART_PLATFORM_RE = /^[a-z0-9-]{2,32}$/
+
+/** 扫描这些平台的插画；urlOf 决定文件对外的地址（art:// 或 /__art/） */
+export function scanArt(
+  dirs: string[],
+  ids: PlatformId[],
+  defaults: (platform: PlatformId) => ArtManifest,
+  urlOf: (platform: PlatformId, file: string, mtime: number) => string
+): ArtState {
   const state = {} as ArtState
-  for (const p of PLATFORM_IDS) {
+  for (const p of ids) {
+    if (!ART_PLATFORM_RE.test(p)) continue
     const files: ArtFiles = {}
     for (const [slot, base] of Object.entries(ART_SLOTS) as [keyof ArtFiles, string][]) {
       const hit = findSlot(dirs, p, base)
       if (hit) files[slot] = urlOf(p, hit.name, Math.round(fs.statSync(hit.file).mtimeMs))
     }
-    state[p] = { manifest: readManifest(dirs, p), files }
+    state[p] = { manifest: readManifest(dirs, p, defaults(p)), files }
   }
   return state
 }

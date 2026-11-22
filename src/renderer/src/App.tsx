@@ -1,6 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
-import { PLATFORM_IDS, PLATFORM_META } from '@shared/quota'
 import type { PlatformId } from '../../main/providers/types'
 import { api } from './api'
 import { IconBack } from './components/Icons'
@@ -30,6 +29,8 @@ export function App() {
   const [settingsFocus, setSettingsFocus] = useState<PlatformId | null>(null)
   const [guides, setGuides] = useState(false)
   const cardRefs = useRef<Partial<Record<PlatformId, HTMLDivElement | null>>>({})
+  /** 当前可见平台（键盘 ←/→ 切换用） */
+  const idsRef = useRef<PlatformId[]>([])
 
   const rectOf = useCallback((p: PlatformId | null): Rect => {
     const el = p ? cardRefs.current[p] : null
@@ -47,9 +48,11 @@ export function App() {
         if (settingsOpen) setSettingsOpen(false)
         else if (detail) setDetail(null)
       } else if (detail && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
-        const i = PLATFORM_IDS.indexOf(detail)
-        const n = (i + (e.key === 'ArrowRight' ? 1 : PLATFORM_IDS.length - 1)) % PLATFORM_IDS.length
-        setDetail(PLATFORM_IDS[n])
+        const ids = idsRef.current
+        if (ids.length === 0) return
+        const i = ids.indexOf(detail)
+        const n = (i + (e.key === 'ArrowRight' ? 1 : ids.length - 1)) % ids.length
+        setDetail(ids[n])
       }
     }
     window.addEventListener('keydown', onKey)
@@ -58,7 +61,9 @@ export function App() {
 
   if (!state) return <div className={s.boot} />
 
-  const views = PLATFORM_IDS.map((p) => buildView(p, state.snapshots[p], state.settings, art, now))
+  const visible = state.platforms.filter((p) => !p.hidden)
+  idsRef.current = visible.map((p) => p.id)
+  const views = visible.map((info) => buildView(info, state.snapshots[info.id], state.settings, art, now))
   const refreshingAny = state.refreshing.length > 0
   const openSettings = (p: PlatformId | null) => {
     setSettingsFocus(p)
@@ -66,7 +71,8 @@ export function App() {
   }
   const recheck = (p: PlatformId) => void api.refresh(p)
 
-  const detailView = detail ? views.find((v) => v.id === detail)! : null
+  // 平台被隐藏 / 删除后自动回到总览
+  const detailView = detail ? (views.find((v) => v.id === detail) ?? null) : null
 
   return (
     <div className={s.app}>
@@ -123,15 +129,16 @@ export function App() {
                 <IconBack /> 返回
               </button>
               <div className={s.tabs}>
-                {PLATFORM_IDS.map((p) => (
+                {views.map((v) => (
                   <button
-                    key={p}
-                    className={p === detail ? s.tabOn : ''}
-                    style={{ '--accent': art[p].manifest.accent } as CSSProperties}
-                    onClick={() => setDetail(p)}
+                    key={v.id}
+                    className={v.id === detail ? s.tabOn : ''}
+                    style={{ '--accent': v.manifest.accent } as CSSProperties}
+                    onClick={() => setDetail(v.id)}
+                    title={v.meta.name}
                   >
-                    <PlatformIcon id={p} size={14} />
-                    {PLATFORM_META[p].name}
+                    <PlatformIcon kind={v.info.kind} name={v.meta.name} size={14} />
+                    <span className={s.tabName}>{v.meta.name}</span>
                   </button>
                 ))}
               </div>

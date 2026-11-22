@@ -9,9 +9,17 @@
 import { app, protocol } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
-import { PLATFORM_IDS } from '../shared/quota'
-import { ART_FILE_RE, ART_MIME, findArtFile, scanArt } from './art-scan'
-import type { ArtState, PlatformId } from './providers/types'
+import { ART_FILE_RE, ART_MIME, ART_PLATFORM_RE, findArtFile, scanArt } from './art-scan'
+import type { ArtManifest, ArtState, PlatformId } from './providers/types'
+
+/** 当前平台列表与默认 manifest（由 index 注入，随设置变化） */
+let artIds: () => PlatformId[] = () => []
+let artDefaults: (p: PlatformId) => ArtManifest
+
+export function configureArt(ids: () => PlatformId[], defaults: (p: PlatformId) => ArtManifest): void {
+  artIds = ids
+  artDefaults = defaults
+}
 
 export const ART_SCHEME = 'art'
 
@@ -38,7 +46,7 @@ export function artDirs(): string[] {
 /** "打开插画文件夹"：打包后为用户覆盖目录（不存在则创建骨架），开发时为项目 art/ */
 export function ensureEditableArtDir(): string {
   const dir = app.isPackaged ? userArtDir() : bundledArtDir()
-  for (const p of PLATFORM_IDS) fs.mkdirSync(path.join(dir, p), { recursive: true })
+  for (const p of artIds()) if (ART_PLATFORM_RE.test(p)) fs.mkdirSync(path.join(dir, p), { recursive: true })
   const readme = path.join(dir, '说明.txt')
   if (!fs.existsSync(readme)) {
     fs.writeFileSync(
@@ -46,7 +54,7 @@ export function ensureEditableArtDir(): string {
       [
         '额度娘 Quota Girls · 插画文件夹',
         '',
-        '每个平台一个子目录：claude / codex / antigravity',
+        '每个平台一个子目录：claude / codex / antigravity / deepseek，自定义第三方平台的目录名是它的 id（x-…）',
         '  card.png        1024×1536（2:3 竖版） 总览页角色卡',
         '  hero.png        1536×1024（3:2 横版） 详情页全屏背景',
         '  avatar.png      1024×1024（可选）     迷你挂件头像（缺省时从 card 裁脸）',
@@ -69,7 +77,7 @@ export function ensureEditableArtDir(): string {
 }
 
 export function getArtState(): ArtState {
-  return scanArt(artDirs(), (p, file, v) => `${ART_SCHEME}://img/${p}/${file}?v=${v}`)
+  return scanArt(artDirs(), artIds(), artDefaults, (p, file, v) => `${ART_SCHEME}://img/${p}/${file}?v=${v}`)
 }
 
 /** app ready 之后调用 */
@@ -78,10 +86,10 @@ export function registerArtProtocol(): void {
     try {
       const u = new URL(req.url)
       const [platform, file] = decodeURIComponent(u.pathname).split('/').filter(Boolean)
-      if (!PLATFORM_IDS.includes(platform as PlatformId) || !file || !ART_FILE_RE.test(file)) {
+      if (!platform || !artIds().includes(platform) || !file || !ART_FILE_RE.test(file)) {
         return new Response('not found', { status: 404 })
       }
-      const f = findArtFile(artDirs(), platform as PlatformId, file)
+      const f = findArtFile(artDirs(), platform, file)
       if (!f) return new Response('not found', { status: 404 })
       const data = await fs.promises.readFile(f)
       const ext = file.split('.').pop()!.toLowerCase()

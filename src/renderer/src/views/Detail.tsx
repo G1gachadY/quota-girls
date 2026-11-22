@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { useMemo, useState, type CSSProperties, type ReactNode } from 'react'
-import { formatAgo, formatClock, levelOf, remainingOf } from '@shared/quota'
+import { balancePercent, formatAgo, formatClock, formatMoney, levelOf, remainingOf } from '@shared/quota'
 import type { AppSettings, PlatformId } from '../../../main/providers/types'
 import { ArtImage } from '../components/ArtImage'
 import { Bar, Ring, RollingNumber } from '../components/Gauges'
@@ -43,7 +43,9 @@ export function Detail({
   const apiValue = useValue(v.id, v.snap.fetchedAt)
   const [valueRange, setValueRange] = useState<'session' | 'weekly' | 'month'>('weekly')
   const mode = settings.displayMode
-  const value = displayValue(v.primary, mode)
+  const bal = v.balance
+  const balPct = balancePercent(bal)
+  const value = bal ? balPct ?? (bal.amount == null || bal.amount > 0 ? 100 : 0) : displayValue(v.primary, mode)
   const st = statusText(v, now)
   const order = useMemo(() => v.windows.map((w) => ({ id: w.id, label: w.label })), [v.windows])
   const style = { '--accent': v.manifest.accent, '--accent2': v.manifest.accent2 } as CSSProperties
@@ -84,6 +86,7 @@ export function Detail({
               layout={art.layout}
               slot="hero"
               platform={v.id}
+              kind={v.info.kind}
               accent={v.manifest.accent}
               letter={v.meta.name[0]}
               className={artMod}
@@ -113,7 +116,7 @@ export function Detail({
           <div className="deco">NO.{v.meta.no} · CHARACTER STATUS</div>
           <h1 className={s.h1}>
             <span className={s.h1Icon}>
-              <PlatformIcon id={v.id} size={24} />
+              <PlatformIcon kind={v.info.kind} name={v.meta.name} size={24} />
             </span>
             {v.meta.en}
             {v.snap.plan && <span className={s.plan}>{v.snap.plan}</span>}
@@ -121,6 +124,31 @@ export function Detail({
           <div className={s.account}>{v.snap.account ?? '—'}</div>
         </header>
 
+        {bal ? (
+          <div className={s.hero}>
+            <Ring value={value} color={v.color} size={156} thickness={6} glow={v.level === 'low'}>
+              <div className={`${s.ringNum} ${s.ringMoney}`} style={{ color: v.color }}>
+                {balPct != null ? `${fmtPct(balPct)}%` : bal.amount == null ? '∞' : '余额'}
+              </div>
+              <div className={s.ringLabel}>{balPct != null ? '剩余比例' : bal.amount == null ? '不限额' : bal.currency}</div>
+            </Ring>
+            <div className={s.heroInfo}>
+              <div className="deco">{bal.amount == null ? 'USED' : 'BALANCE'} · {bal.currency || '—'}</div>
+              <div className={s.cdBig} style={{ color: v.color }}>
+                {formatMoney(bal.amount ?? bal.used ?? null, bal.currency)}
+              </div>
+              <div className={s.resetAt}>
+                {bal.amount == null
+                  ? '令牌不限额度，这里显示已用量'
+                  : [bal.total != null && `总额 ${formatMoney(bal.total, bal.currency)}`, bal.used != null && `已用 ${formatMoney(bal.used, bal.currency)}`]
+                      .filter(Boolean)
+                      .join(' · ') || '按量付费，不会自动回满'}
+              </div>
+              {v.level === 'empty' && <div className={s.emptyTag}>余额耗尽</div>}
+              {v.level === 'low' && <div className={s.emptyTag}>低于提醒线 {formatMoney(v.lowBalance, bal.currency)}</div>}
+            </div>
+          </div>
+        ) : (
         <div className={s.hero}>
           <Ring value={value} color={v.color} size={156} thickness={6} glow={v.level === 'low'}>
             <div className={s.ringNum} style={{ color: v.color }}>
@@ -137,6 +165,8 @@ export function Detail({
           </div>
         </div>
 
+        )}
+
         {v.snap.error && v.snap.status !== 'ok' && (
           <div className={s.alert}>
             <IconAlert className={s.alertIcon} />
@@ -150,7 +180,28 @@ export function Detail({
           </div>
         )}
 
-        <Section title="全部窗口" en="ALL WINDOWS" />
+        {bal && (
+          <>
+            <Section title="余额明细" en="BALANCE" />
+            <ul className={s.windows}>
+              {(bal.parts ?? []).length === 0 && <li className={s.muted}>{v.snap.note ?? '接口没有返回明细'}</li>}
+              {(bal.parts ?? []).map((part) => (
+                <li key={part.label} className={s.winRow}>
+                  <span className={s.winLabel}>{part.label}</span>
+                  <Bar
+                    value={bal.amount && bal.amount > 0 ? Math.min(100, (part.amount / bal.amount) * 100) : 0}
+                    color={v.manifest.accent}
+                    height={5}
+                  />
+                  <span className={s.winPct}>{formatMoney(part.amount, bal.currency)}</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {!bal && <Section title="全部窗口" en="ALL WINDOWS" />}
+        {!bal && (
         <ul className={s.windows}>
           {v.windows.length === 0 && <li className={s.muted}>{v.snap.note ?? '暂无数据'}</li>}
           {v.windows.map((w) => {
@@ -171,7 +222,10 @@ export function Detail({
             )
           })}
         </ul>
+        )}
 
+        {v.info.value && (
+          <>
         <Section
           title="等价 API 价值"
           en="API VALUE"
@@ -192,6 +246,11 @@ export function Detail({
           }
         />
         <ValuePanel report={apiValue} rangeId={valueRange} platform={v.id} />
+          </>
+        )}
+
+        {v.windows.length > 0 && (
+          <>
 
         <Section
           title={range === '24h' ? '近 24 小时' : '近 7 天'}
@@ -216,6 +275,8 @@ export function Detail({
           range={range}
           now={now}
         />
+          </>
+        )}
 
         {(v.snap.extras?.credits || v.snap.extras?.extraUsage) && (
           <>

@@ -111,6 +111,18 @@ export class Store {
     this.cache.saveSoon()
   }
 
+  /** 删除平台后清掉它的快照缓存和历史 */
+  forget(platform: PlatformId): void {
+    if (platform in this.cache.data) {
+      delete this.cache.data[platform]
+      this.cache.saveSoon()
+    }
+    if (platform in this.history.data) {
+      delete this.history.data[platform]
+      this.history.saveSoon()
+    }
+  }
+
   /** 每个窗口每个周期只提醒一次 */
   markNotified(key: string): boolean {
     if (this.notified.data[key]) return false

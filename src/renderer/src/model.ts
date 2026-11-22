@@ -1,7 +1,10 @@
 /** 视图模型：把快照 + 设置 + 插画合成每张卡需要的显示数据 */
 import {
-  PLATFORM_META,
+  balanceLevel,
+  balancePercent,
   copyFor,
+  defaultManifest,
+  lowBalanceOf,
   effectiveWindow,
   formatAgo,
   formatCountdown,
@@ -9,15 +12,16 @@ import {
   pickPrimary,
   remainingOf,
   type Copy,
-  type Level,
-  type PlatformMeta
+  type Level
 } from '@shared/quota'
 import type {
   AppSettings,
   ArtFiles,
   ArtManifest,
   ArtState,
+  Balance,
   PlatformId,
+  PlatformInfo,
   PlatformSnapshot,
   QuotaWindow
 } from '../../main/providers/types'
@@ -26,7 +30,9 @@ export type EffWindow = QuotaWindow & { inferredReset?: boolean }
 
 export interface PlatformView {
   id: PlatformId
-  meta: PlatformMeta
+  /** 平台信息（名字、编号、类型、Key 来源…） */
+  info: PlatformInfo
+  meta: { id: PlatformId; name: string; en: string; no: string }
   snap: PlatformSnapshot
   manifest: ArtManifest
   files: ArtFiles
@@ -41,6 +47,10 @@ export interface PlatformView {
   /** 未连接（无数据源） */
   disconnected: boolean
   copy: Copy
+  /** 按量付费平台的余额（没有额度窗口时显示它） */
+  balance?: Balance
+  /** 余额提醒线 */
+  lowBalance: number
 }
 
 export const LEVEL_COLORS = { warn: '#F5B544', low: '#FF5A5F', empty: '#FF5A5F', unknown: 'rgba(233,236,242,0.38)' }
@@ -50,22 +60,30 @@ export function levelColor(level: Level, accent: string): string {
 }
 
 export function buildView(
-  id: PlatformId,
-  snap: PlatformSnapshot,
+  info: PlatformInfo,
+  snapIn: PlatformSnapshot | undefined,
   settings: AppSettings,
   art: ArtState,
   now: number
 ): PlatformView {
-  const { manifest, files } = art[id]
+  const id = info.id
+  const snap: PlatformSnapshot = snapIn ?? { platform: id, status: 'loading', source: 'none', windows: [], fetchedAt: new Date(now).toISOString() }
+  const { manifest, files } = art[id] ?? { manifest: defaultManifest(id, settings), files: {} }
   const windows = snap.windows.map((w) => effectiveWindow(w, now))
   const primary = pickPrimary(snap, settings.primaryRule[id], now)
-  const remaining = remainingOf(primary)
-  const level = levelOf(remaining)
-  const hasData = windows.some((w) => w.known)
+  // 余额平台没有额度窗口：知道总额时按 剩余/总额，否则只按金额判断紧张程度
+  const balance = windows.length === 0 ? snap.balance : undefined
+  const lowBalance = lowBalanceOf(settings, id)
+  const remaining = balance ? balancePercent(balance) : remainingOf(primary)
+  const level = balance ? balanceLevel(balance, lowBalance) : levelOf(remaining)
+  const hasData = windows.some((w) => w.known) || !!balance
   return {
     id,
-    meta: PLATFORM_META[id],
+    info,
+    meta: { id, name: info.name, en: info.en, no: info.no },
     snap,
+    balance,
+    lowBalance,
     manifest,
     files,
     primary,
@@ -190,5 +208,15 @@ export const SOURCE_LABELS: Record<string, string> = {
   rpc: 'CLI RPC',
   'local-log': '本地会话日志',
   'local-ls': '本地 Language Server',
+  'cc-switch': '余额接口 · Key 来自 CC Switch',
+  manual: '余额接口 · 手动填写的 Key',
+  env: '余额接口 · 环境变量 Key',
+  'openai-billing': '中转站账单接口',
+  newapi: 'New API 账户接口',
+  openrouter: 'OpenRouter 官方接口',
+  moonshot: 'Kimi 官方接口',
+  siliconflow: '硅基流动官方接口',
+  deepseek: 'DeepSeek 官方接口',
+  json: '自定义 JSON 接口',
   none: '—'
 }

@@ -13,7 +13,11 @@ import { scanClaudeCode } from './claude-code'
 import { scanCodex } from './codex'
 import { RETENTION_MS } from './files'
 
-const SCOPE: Record<PlatformId, { scope: string; caveat: string }> = {
+/** 支持等价 API 价值的平台（有本机用量记录） */
+export type ValuePlatform = 'claude' | 'codex' | 'antigravity'
+export const VALUE_PLATFORMS: ValuePlatform[] = ['claude', 'codex', 'antigravity']
+
+const SCOPE: Record<ValuePlatform, { scope: string; caveat: string }> = {
   claude: {
     scope: 'Claude Code 本机会话记录',
     caveat: 'Claude 桌面版 / 网页版 / 手机端的对话不在本机留记录，无法计入；实际消耗的订阅额度会比这里多。'
@@ -28,7 +32,18 @@ const SCOPE: Record<PlatformId, { scope: string; caveat: string }> = {
   }
 }
 
-const SCANNERS: Record<PlatformId, (since: number) => Promise<{ events: UsageEvent[]; files: number; error?: string }>> = {
+/**
+ * 只算走这个订阅的请求：用 CC Switch 把 Claude Code / Codex 切到 DeepSeek、百炼等第三方时，
+ * 本机记录里会出现别家的模型，那些不消耗这个订阅，排除掉。
+ */
+const OTHER_VENDORS = /^(deepseek|qwen|glm|kimi|moonshot|minimax|doubao|ernie|hunyuan|yi-|baichuan|step-)/i
+const MODEL_FILTER: Record<ValuePlatform, (model: string) => boolean> = {
+  claude: (m) => /^claude/i.test(m),
+  codex: (m) => !OTHER_VENDORS.test(m) && !/^(claude|gemini)/i.test(m),
+  antigravity: () => true
+}
+
+const SCANNERS: Record<ValuePlatform, (since: number) => Promise<{ events: UsageEvent[]; files: number; error?: string }>> = {
   claude: scanClaudeCode,
   codex: scanCodex,
   antigravity: scanAntigravity
@@ -36,10 +51,10 @@ const SCANNERS: Record<PlatformId, (since: number) => Promise<{ events: UsageEve
 
 /** 同一平台 20 秒内重复打开详情页不重复扫描 */
 const MIN_RESCAN_MS = 20_000
-const cache = new Map<PlatformId, { at: number; events: UsageEvent[]; files: number; error?: string }>()
-const inflight = new Map<PlatformId, Promise<{ at: number; events: UsageEvent[]; files: number; error?: string }>>()
+const cache = new Map<ValuePlatform, { at: number; events: UsageEvent[]; files: number; error?: string }>()
+const inflight = new Map<ValuePlatform, Promise<{ at: number; events: UsageEvent[]; files: number; error?: string }>>()
 
-async function scan(p: PlatformId) {
+async function scan(p: ValuePlatform) {
   const hit = cache.get(p)
   if (hit && Date.now() - hit.at < MIN_RESCAN_MS) return hit
   let job = inflight.get(p)
@@ -110,8 +125,13 @@ export function customPrices(): ModelPrice[] {
   return prices
 }
 
-export async function getValueReport(p: PlatformId, snap: PlatformSnapshot | undefined): Promise<ValueReport> {
-  const r = await scan(p)
+export function isValuePlatform(p: PlatformId): p is ValuePlatform {
+  return (VALUE_PLATFORMS as string[]).includes(p)
+}
+
+export async function getValueReport(p: ValuePlatform, snap: PlatformSnapshot | undefined): Promise<ValueReport> {
+  const scanned = await scan(p)
+  const r = { ...scanned, events: scanned.events.filter((e) => MODEL_FILTER[p](e.model)) }
   const now = Date.now()
   const extra = customPrices()
   const earliest = r.events.reduce<number | null>((m, e) => (m == null || e.t < m ? e.t : m), null)
