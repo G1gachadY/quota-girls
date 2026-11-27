@@ -5,6 +5,7 @@
  *   Anthropic  https://platform.claude.com/docs/en/about-claude/pricing
  *   OpenAI     https://developers.openai.com/api/docs/pricing
  *   Google     https://ai.google.dev/gemini-api/docs/pricing
+ *   DeepSeek   https://api-docs.deepseek.com/zh-cn/quick_start/pricing（人民币，分高峰 / 空闲时段）
  * 价目表里没有的模型显示"无公开定价"，不计入总额；可在 %APPDATA%\QuotaGirls\pricing.json 里补充或覆盖。
  */
 import type {
@@ -17,11 +18,14 @@ import type {
 } from '../main/providers/types'
 
 export const PRICING_CHECKED_AT = '2026-11-22'
+/** DeepSeek 价格单独核对的日期 */
+export const DEEPSEEK_PRICING_CHECKED_AT = '2026-11-27'
 
 export const PRICING_SOURCES = {
   anthropic: 'https://platform.claude.com/docs/en/about-claude/pricing',
   openai: 'https://developers.openai.com/api/docs/pricing',
-  google: 'https://ai.google.dev/gemini-api/docs/pricing'
+  google: 'https://ai.google.dev/gemini-api/docs/pricing',
+  deepseek: 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing'
 } as const
 
 interface Tier {
@@ -34,7 +38,12 @@ interface Tier {
 
 export interface ModelPrice {
   label: string
-  vendor: 'anthropic' | 'openai' | 'google' | 'custom'
+  vendor: 'anthropic' | 'openai' | 'google' | 'deepseek' | 'custom'
+  /** 价格的币种，默认 USD */
+  currency?: string
+  /** 是否处于高峰时段；不在高峰时单价乘 offPeak（DeepSeek 空闲时段半价） */
+  peak?: (t: number) => boolean
+  offPeak?: number
   /** 匹配规范化后的模型 ID（见 normalizeModel） */
   match: RegExp
   /** 按生效日期升序 */
@@ -68,6 +77,24 @@ const gemini = (input: number, output: number, cache: number): UnitPrice => ({
   cacheWrite1h: input
 })
 
+// DeepSeek：缓存未命中按输入价，缓存写入同样按输入价计
+const deepseek = (input: number, hit: number, output: number): UnitPrice => ({
+  input,
+  output,
+  cacheRead: hit,
+  cacheWrite5m: input,
+  cacheWrite1h: input
+})
+
+/** DeepSeek 高峰时段：北京时间周一至周五 9:00–12:00、14:00–18:00（法定节假日无法判断，按工作日算） */
+export function deepseekPeak(t: number): boolean {
+  const d = new Date(t + 8 * 3600 * 1000)
+  const day = d.getUTCDay()
+  if (day === 0 || day === 6) return false
+  const m = d.getUTCHours() * 60 + d.getUTCMinutes()
+  return (m >= 540 && m < 720) || (m >= 840 && m < 1080)
+}
+
 const one = (price: UnitPrice, long?: Tier['long']): Tier[] => [{ price, long }]
 
 export const MODEL_PRICES: ModelPrice[] = [
@@ -90,6 +117,26 @@ export const MODEL_PRICES: ModelPrice[] = [
     tiers: one(claude(0.1, 0.5, 0.01), { over: 100_000, price: claude(0.5, 2.5, 0.05) })
   },
   { label: 'Claude Haiku 4.5', vendor: 'anthropic', match: /^claude-haiku-4[-.]5(?!\d)/, tiers: one(claude(1, 5, 0.1)) },
+
+  // ── DeepSeek（元 / 百万 tokens，下面是高峰价，空闲时段半价）──
+  {
+    label: 'DeepSeek Flash',
+    vendor: 'deepseek',
+    currency: 'CNY',
+    match: /^deepseek-(v4-)?flash/,
+    tiers: one(deepseek(2, 0.04, 8)),
+    peak: deepseekPeak,
+    offPeak: 0.5
+  },
+  {
+    label: 'DeepSeek V4 Pro',
+    vendor: 'deepseek',
+    currency: 'CNY',
+    match: /^deepseek-v4-pro/,
+    tiers: one(deepseek(9, 0.3, 27)),
+    peak: deepseekPeak,
+    offPeak: 0.5
+  },
 
   // ── OpenAI（短上下文 ≤272K / 长上下文 >272K）──
   { label: 'GPT-6.2 Astra', vendor: 'openai', match: /^gpt-6\.2-astra/, tiers: one(openai(8, 0.4, 40, 10), { over: 272_000, price: openai(16, 0.8, 60, 20) }) },
@@ -195,13 +242,15 @@ export function promptTokens(e: UsageTokens): number {
 }
 
 /** 单次请求实际适用的单价 */
-export function unitPriceFor(e: UsageEvent, entry: ModelPrice): { unit: UnitPrice; long: boolean } {
+export function unitPriceFor(e: UsageEvent, entry: ModelPrice): { unit: UnitPrice; long: boolean; offPeak: boolean } {
   const tier = tierAt(entry, e.t)
   const long = !!tier.long && promptTokens(e) > tier.long.over
   let unit = long ? tier.long!.price : tier.price
+  const offPeak = !!entry.peak && !entry.peak(e.t)
+  if (offPeak && entry.offPeak) unit = scale(unit, entry.offPeak)
   if (e.fast && entry.fast) unit = scale(unit, entry.fast)
   if (e.geoUs && entry.vendor === 'anthropic') unit = scale(unit, 1.1)
-  return { unit, long }
+  return { unit, long, offPeak }
 }
 
 const WEB_SEARCH_USD = 10 / 1000
@@ -216,10 +265,13 @@ export function totalTokens(e: UsageTokens): number {
 /** 把一批请求按模型汇总并折算 */
 export function aggregateValue(
   events: UsageEvent[],
-  range: Pick<ValueRange, 'id' | 'label' | 'from' | 'to'>,
-  extra: ModelPrice[] = []
+  range: Pick<ValueRange, 'id' | 'label' | 'short' | 'from' | 'to'>,
+  extra: ModelPrice[] = [],
+  /** 没有可计价的请求时用的币种 */
+  fallbackCurrency = 'USD'
 ): ValueRange {
-  const rows = new Map<string, ValueModelRow & { lastT: number; longN: number; fastN: number }>()
+  const rows = new Map<string, ValueModelRow & { lastT: number; longN: number; fastN: number; offN: number }>()
+  let currency: string | null = null
   for (const e of events) {
     if (e.t < range.from || e.t > range.to) continue
     if (totalTokens(e) === 0) continue
@@ -238,14 +290,17 @@ export function aggregateValue(
         notes: [],
         lastT: 0,
         longN: 0,
-        fastN: 0
+        fastN: 0,
+        offN: 0
       }
       rows.set(key, row)
     }
     row.requests++
     for (const k of TOKEN_KEYS) row.tokens[k] += e[k]
     if (!entry) continue
-    const { unit, long } = unitPriceFor(e, entry)
+    currency ??= entry.currency ?? 'USD'
+    const { unit, long, offPeak } = unitPriceFor(e, entry)
+    if (offPeak) row.offN++
     for (const k of TOKEN_KEYS) row.cost[k] += (e[k] * unit[k]) / 1e6
     if (e.webSearches && entry.vendor === 'anthropic') row.cost.extra += e.webSearches * WEB_SEARCH_USD
     if (long) row.longN++
@@ -260,10 +315,11 @@ export function aggregateValue(
   let total = 0
   let requests = 0
   let unpricedTokens = 0
-  for (const { lastT: _t, longN, fastN, ...row } of rows.values()) {
+  for (const { lastT: _t, longN, fastN, offN, ...row } of rows.values()) {
     row.total = TOKEN_KEYS.reduce((s, k) => s + row.cost[k], row.cost.extra)
     if (longN) row.notes.push(`${longN} 次请求超过长上下文阈值，按长上下文价`)
     if (fastN) row.notes.push(`${fastN} 次请求为快速模式（价格 ×2）`)
+    if (offN) row.notes.push(`${offN} 次请求在空闲时段，按半价`)
     if (row.cost.extra) row.notes.push('含网页搜索 $10 / 千次')
     if (!row.priced) unpricedTokens += totalTokens(row.tokens)
     total += row.total
@@ -271,13 +327,28 @@ export function aggregateValue(
     models.push(row)
   }
   models.sort((a, b) => Number(b.priced) - Number(a.priced) || b.total - a.total || totalTokens(b.tokens) - totalTokens(a.tokens))
-  return { ...range, total, requests, unpricedTokens, models }
+  return { ...range, currency: currency ?? fallbackCurrency, total, requests, unpricedTokens, models }
 }
 
 const H = 3600 * 1000
 
-/** 统计区间：当前 5 小时周期、本周周期（按额度窗口的重置时间对齐），近 30 天 */
-export function valueRanges(snap: PlatformSnapshot | undefined, now: number): Pick<ValueRange, 'id' | 'label' | 'from' | 'to'>[] {
+type RangeDef = Pick<ValueRange, 'id' | 'label' | 'short' | 'from' | 'to'>
+
+/**
+ * 统计区间：
+ *   订阅平台   当前 5 小时周期、本周周期（按额度窗口的重置时间对齐），近 30 天
+ *   余额平台   今天、近 7 天、近 30 天
+ */
+export function valueRanges(snap: PlatformSnapshot | undefined, now: number): RangeDef[] {
+  if (snap?.balance || snap?.platform === 'deepseek') {
+    const midnight = new Date(now)
+    midnight.setHours(0, 0, 0, 0)
+    return [
+      { id: 'session', label: '今天', short: '今天', from: midnight.getTime(), to: now },
+      { id: 'weekly', label: '近 7 天', short: '7天', from: now - 7 * 24 * H, to: now },
+      { id: 'month', label: '近 30 天', short: '30天', from: now - 30 * 24 * H, to: now }
+    ]
+  }
   const future = (kind: string) =>
     (snap?.windows ?? [])
       .filter((w) => w.kind === kind && w.resetsAt && Date.parse(w.resetsAt) > now)
@@ -286,9 +357,13 @@ export function valueRanges(snap: PlatformSnapshot | undefined, now: number): Pi
   const s = future('session')
   const w = future('weekly')
   return [
-    s ? { id: 'session', label: '本 5 小时周期', from: s - 5 * H, to: now } : { id: 'session', label: '近 5 小时', from: now - 5 * H, to: now },
-    w ? { id: 'weekly', label: '本周周期', from: w - 7 * 24 * H, to: now } : { id: 'weekly', label: '近 7 天', from: now - 7 * 24 * H, to: now },
-    { id: 'month', label: '近 30 天', from: now - 30 * 24 * H, to: now }
+    s
+      ? { id: 'session', label: '本 5 小时周期', short: '5H', from: s - 5 * H, to: now }
+      : { id: 'session', label: '近 5 小时', short: '5H', from: now - 5 * H, to: now },
+    w
+      ? { id: 'weekly', label: '本周周期', short: '本周', from: w - 7 * 24 * H, to: now }
+      : { id: 'weekly', label: '近 7 天', short: '7天', from: now - 7 * 24 * H, to: now },
+    { id: 'month', label: '近 30 天', short: '30天', from: now - 30 * 24 * H, to: now }
   ]
 }
 
@@ -301,14 +376,24 @@ export function formatTokens(n: number): string {
   return String(Math.round(n))
 }
 
-export function formatUsd(v: number): string {
-  if (v === 0) return '$0'
-  if (v < 0.01) return '<$0.01'
-  if (v >= 1000) return `$${Math.round(v).toLocaleString('en-US')}`
-  return `$${v.toFixed(2)}`
+const SIGN: Record<string, string> = { USD: '$', CNY: '¥' }
+
+/** 金额：$12.34 / ¥12.34 / <¥0.01 */
+export function formatCost(v: number, currency = 'USD'): string {
+  const sign = SIGN[currency] ?? ''
+  if (v === 0) return `${sign}0`
+  if (v < 0.01) return `<${sign}0.01`
+  if (v >= 1000) return `${sign}${Math.round(v).toLocaleString('en-US')}`
+  return `${sign}${v.toFixed(2)}`
 }
 
-export function formatUnit(v: number): string {
-  if (v >= 1) return `$${Number(v.toFixed(2))}`
-  return `$${Number(v.toPrecision(3))}`
+export function formatUsd(v: number): string {
+  return formatCost(v, 'USD')
+}
+
+/** 单价：$4 / ¥0.04 */
+export function formatUnit(v: number, currency = 'USD'): string {
+  const sign = SIGN[currency] ?? ''
+  if (v >= 1) return `${sign}${Number(v.toFixed(2))}`
+  return `${sign}${Number(v.toPrecision(3))}`
 }

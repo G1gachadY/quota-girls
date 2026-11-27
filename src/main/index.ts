@@ -9,7 +9,6 @@ import {
   DEFAULT_SETTINGS,
   defaultManifest,
   formatMoney,
-  isBuiltin,
   platformList,
   pickPrimary,
   remainingOf
@@ -21,7 +20,7 @@ import { deepseekKeySource } from './providers/balance'
 import type { ActionResult, AppSettings, AppState, PlatformId, PlatformInfo } from './providers/types'
 import { Scheduler } from './scheduler'
 import { Store } from './store'
-import { hasSecret, pruneSecrets, setSecret } from './secrets'
+import { hasSecret, setSecret } from './secrets'
 import { getValueReport, isValuePlatform } from './usage'
 
 const APP_ID = 'com.quotagirls.app'
@@ -51,17 +50,15 @@ let stopWatch: (() => void) | null = null
 function platforms(): PlatformInfo[] {
   return platformList(store.settings.data, (id) => {
     if (id === 'deepseek') return { keySource: hasSecret('deepseek') ? 'manual' : deepseekKeySource }
-    if (isBuiltin(id)) return {}
-    return { keySource: hasSecret(id) ? 'manual' : null }
+    return {}
   })
 }
 const allIds = (): PlatformId[] => platforms().map((p) => p.id)
 const visibleIds = (): PlatformId[] => platforms().filter((p) => !p.hidden).map((p) => p.id)
 const nameOf = (id: PlatformId): string => platforms().find((p) => p.id === id)?.name ?? id
-/** 平台图标 PNG（托盘 / 通知）：内置平台用自己的，自定义平台按类型找 */
+/** 平台图标 PNG（托盘 / 通知） */
 function iconFile(id: PlatformId): string {
-  const kind = isBuiltin(id) ? id : (store.settings.data.customPlatforms.find((c) => c.id === id)?.kind ?? 'json')
-  return resource(path.join('platforms', `${kind}.png`))
+  return resource(path.join('platforms', `${id}.png`))
 }
 
 function resource(name: string): string {
@@ -359,23 +356,9 @@ function applySettings(prev: AppSettings, next: AppSettings): void {
   }
   if (prev.maskEmail !== next.maskEmail) void scheduler.refreshAll(false)
 
-  // 平台增删 / 隐藏 / 改配置
-  const prevIds = new Set(prev.customPlatforms.map((c) => c.id))
-  const nextIds = new Set(next.customPlatforms.map((c) => c.id))
-  const removed = [...prevIds].filter((id) => !nextIds.has(id))
-  for (const id of removed) store.forget(id)
-  if (removed.length) pruneSecrets(new Set(['deepseek', ...nextIds]))
-  const listChanged =
-    JSON.stringify(prev.customPlatforms) !== JSON.stringify(next.customPlatforms) ||
-    JSON.stringify(prev.hidden) !== JSON.stringify(next.hidden)
-  if (listChanged) {
+  // 平台隐藏 / 显示
+  if (JSON.stringify(prev.hidden) !== JSON.stringify(next.hidden)) {
     scheduler.sync()
-    // 配置改过的平台立刻重新查询
-    for (const c of next.customPlatforms) {
-      const old = prev.customPlatforms.find((x) => x.id === c.id)
-      if (old && JSON.stringify(old) !== JSON.stringify(c)) void scheduler.refreshFresh(c.id)
-    }
-    broadcast('art:changed', getArtState())
     if (miniWin && !miniWin.isDestroyed()) {
       const [x, y] = miniWin.getPosition()
       miniWin.setBounds({ x, y, width: MINI_W, height: miniHeight() })
@@ -410,12 +393,13 @@ function registerIpc(): void {
     isPlatform(p) ? scheduler.refresh(p, true) : scheduler.refreshAll(true)
   )
   handle('history:get', (p: unknown) => (isPlatform(p) ? store.getHistory(p) : { windows: {} }))
+  handle('balance:history', (p: unknown) => (isPlatform(p) ? store.getBalanceHistory(p) : { currency: 'CNY', points: [] }))
   handle('raw:get', (p: unknown) => (isPlatform(p) ? scheduler.raw[p] ?? [] : []))
   handle('value:get', (p: unknown) =>
     typeof p === 'string' && isValuePlatform(p) ? getValueReport(p, scheduler.snapshots[p]) : null
   )
   handle('platform:set-key', (p: unknown, key: unknown): ActionResult => {
-    if (!isPlatform(p) || (isBuiltin(p) && p !== 'deepseek')) return { ok: false, message: '这个平台不需要 Key' }
+    if (p !== 'deepseek') return { ok: false, message: '这个平台不需要 Key' }
     if (key == null || key === '') {
       setSecret(p, null)
     } else {
@@ -510,7 +494,7 @@ app.whenReady().then(() => {
 
   registerArtProtocol()
   store = new Store(app.getPath('userData'))
-  configureArt(allIds, (p) => defaultManifest(p, store.settings.data))
+  configureArt(allIds, (p) => defaultManifest(p))
   scheduler = new Scheduler(store, visibleIds)
   scheduler.onChange(pushState)
   scheduler.onSnapshot((p, prev, next) => {

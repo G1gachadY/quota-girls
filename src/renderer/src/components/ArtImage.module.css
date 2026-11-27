@@ -80,20 +80,6 @@
   pointer-events: none;
 }
 
-/* 没有官方图标的第三方平台：巨大半透明首字母 */
-.bigLetter {
-  right: -6cqw;
-  top: 12cqh;
-  font-size: 82cqw;
-  color: color-mix(in srgb, var(--accent) 22%, transparent);
-}
-
-.hero .bigLetter {
-  right: 14cqw;
-  top: 14cqh;
-  font-size: 60cqh;
-}
-
 /* 巨大半透明平台官方图标（水印） */
 .logoMark {
   position: absolute;

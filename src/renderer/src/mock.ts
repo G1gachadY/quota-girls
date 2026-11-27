@@ -3,18 +3,18 @@
  * URL 参数 ?scenario=default | states | low | tight | empty | loading 切换演示状态。
  * 插画取自开发服务器的 /__art/（项目 art/ 目录）。
  */
-import { PRICING_CHECKED_AT, aggregateValue, valueRanges } from '@shared/pricing'
-import { BUILTIN_IDS, DEFAULT_MANIFESTS, DEFAULT_SETTINGS, isBuiltin, normalizeSettings, platformList } from '@shared/quota'
+import { DEEPSEEK_PRICING_CHECKED_AT, PRICING_CHECKED_AT, aggregateValue, valueRanges } from '@shared/pricing'
+import { BUILTIN_IDS, DEFAULT_MANIFESTS, DEFAULT_SETTINGS, balanceStats, isBuiltin, normalizeSettings, platformList } from '@shared/quota'
 import type {
   AppSettings,
   AppState,
   ArtState,
-  CustomPlatform,
   HistorySeries,
   PlatformId,
   PlatformSnapshot,
   QuotaAPI,
   QuotaWindow,
+  BalancePoint,
   UsageEvent,
   ValueReport
 } from '../../main/providers/types'
@@ -124,17 +124,26 @@ function quotaSnapshots(): Record<PlatformId, PlatformSnapshot> {
   return { claude, codex, antigravity }
 }
 
-/** 演示用的第三方平台（只在浏览器预览里出现） */
-const DEMO_CUSTOMS: CustomPlatform[] = [
-  { id: 'x-demo0001', kind: 'openai-billing', name: '我的中转站', baseUrl: 'https://api.example.com', accent: '#7C8BFF' },
-  { id: 'x-demo0002', kind: 'moonshot', name: 'Kimi', baseUrl: '', accent: '#E6E8EC' }
-]
+/** 假余额历史：14 天，每小时一个点，白天消耗多，第 9 天充值 50 元，最后落在当前余额 */
+function fakeBalance(current: number): BalancePoint[] {
+  const out: BalancePoint[] = []
+  const now = Date.now()
+  let a = current
+  for (let i = 0; i <= 14 * 24; i++) {
+    const t = now - i * H
+    out.push({ t, a: Math.round(a * 100) / 100 })
+    const hour = new Date(t).getHours()
+    a += hour >= 9 && hour < 23 ? 0.12 + ((i * 7) % 5) * 0.04 : 0.01
+    if (i === 5 * 24) a -= 50
+  }
+  return out.reverse()
+}
 
 function snapshots(): Record<PlatformId, PlatformSnapshot> {
   const sc = scenario()
   const at = new Date(Date.now() - 2 * 60000).toISOString()
   // tight = 低于提醒线，empty = 用完
-  const k = sc === 'empty' ? 0 : sc === 'tight' ? 0.04 : 1
+  const k = sc === 'empty' ? 0 : sc === 'tight' ? 0.02 : 1
   const bal = (platform: PlatformId, source: string, balance: PlatformSnapshot['balance']): PlatformSnapshot => ({
     platform,
     status: 'ok',
@@ -146,7 +155,7 @@ function snapshots(): Record<PlatformId, PlatformSnapshot> {
   const quota = quotaSnapshots()
   if (sc === 'loading') {
     const l = (p: PlatformId): PlatformSnapshot => ({ platform: p, status: 'loading', source: 'none', windows: [], fetchedAt: at })
-    return { ...quota, deepseek: l('deepseek'), 'x-demo0001': l('x-demo0001'), 'x-demo0002': l('x-demo0002') }
+    return { ...quota, deepseek: l('deepseek') }
   }
   return {
     ...quota,
@@ -163,25 +172,12 @@ function snapshots(): Record<PlatformId, PlatformSnapshot> {
         : bal('deepseek', 'cc-switch', {
             amount: 86.42 * k,
             currency: 'CNY',
+            stats: balanceStats(fakeBalance(86.42 * k), Date.now(), 86.42 * k),
             parts: [
               { label: '充值', amount: 80 * k },
               { label: '赠送', amount: 6.42 * k }
             ]
-          }),
-    'x-demo0001': bal('x-demo0001', 'openai-billing', {
-      amount: 12.5 * k,
-      total: 50,
-      used: 50 - 12.5 * k,
-      currency: 'USD'
-    }),
-    'x-demo0002': bal('x-demo0002', 'moonshot', {
-      amount: 23.1 * k,
-      currency: 'CNY',
-      parts: [
-        { label: '现金', amount: 15 * k },
-        { label: '代金券', amount: 8.1 * k }
-      ]
-    })
+          })
   }
 }
 
@@ -228,6 +224,10 @@ function fakeUsage(p: PlatformId): UsageEvent[] {
     antigravity: [
       { model: 'gemini-4-argon-trial', name: 'Gemini 4 Argon (High)', w: 0.4, input: 16_000, output: 420, read: 0, write: 0 },
       { model: 'gemini-4-hydrogen', name: 'Gemini 4 Hydrogen (Medium)', w: 0.6, input: 5_000, output: 360, read: 20_000, write: 0 }
+    ],
+    deepseek: [
+      { model: 'deepseek-v4-pro', w: 0.35, input: 3_000, output: 1200, read: 60_000, write: 0 },
+      { model: 'deepseek-flash', w: 0.65, input: 2_500, output: 900, read: 40_000, write: 0 }
     ]
   }
   const out: UsageEvent[] = []
@@ -256,11 +256,15 @@ function fakeUsage(p: PlatformId): UsageEvent[] {
 const SCOPES: Record<PlatformId, Pick<ValueReport, 'scope' | 'caveat'>> = {
   claude: { scope: 'Claude Code 本机会话记录', caveat: 'Claude 桌面版 / 网页版 / 手机端的对话不在本机留记录，无法计入；实际消耗的订阅额度会比这里多。' },
   codex: { scope: 'Codex CLI / IDE 插件本机会话记录', caveat: 'Codex 云端任务和 ChatGPT 网页对话不在本机留记录，无法计入。' },
-  antigravity: { scope: 'Antigravity 本机对话记录', caveat: '只统计这台电脑上的 Antigravity 对话。' }
+  antigravity: { scope: 'Antigravity 本机对话记录', caveat: '只统计这台电脑上的 Antigravity 对话。' },
+  deepseek: {
+    scope: 'Claude Code / Codex 本机记录里走 DeepSeek 的请求',
+    caveat: 'Cherry Studio、网页版等其它客户端的用量不在本机记录里，以余额变化为准。'
+  }
 }
 
 export function createMockApi(): QuotaAPI {
-  let settings: AppSettings = normalizeSettings({ ...DEFAULT_SETTINGS, customPlatforms: DEMO_CUSTOMS })
+  let settings: AppSettings = normalizeSettings({ ...DEFAULT_SETTINGS })
   const snaps = snapshots()
   const listeners = new Set<(s: AppState) => void>()
   const state = (): AppState => ({
@@ -298,33 +302,23 @@ export function createMockApi(): QuotaAPI {
       emit()
     },
     getHistory: async (p) => fakeHistory(snaps[p]),
+    getBalanceHistory: async (p) => ({ currency: 'CNY', points: snaps[p]?.balance ? fakeBalance(snaps[p].balance!.amount ?? 0) : [] }),
     getRaw: async (p) => [{ label: '假数据（浏览器预览）', at: new Date().toISOString(), body: snaps[p] }],
     getValue: async (p) => {
-      if (p !== 'claude' && p !== 'codex' && p !== 'antigravity') return null
+      if (p !== 'claude' && p !== 'codex' && p !== 'antigravity' && p !== 'deepseek') return null
       const events = scenario() === 'loading' ? [] : fakeUsage(p)
       return {
         platform: p,
         ...SCOPES[p],
-        ranges: valueRanges(snaps[p], Date.now()).map((r) => aggregateValue(events, r)),
+        ranges: valueRanges(snaps[p], Date.now()).map((r) => aggregateValue(events, r, [], p === 'deepseek' ? 'CNY' : 'USD')),
         scannedAt: new Date().toISOString(),
         files: 12,
         earliest: events[0]?.t ?? null,
-        pricingCheckedAt: PRICING_CHECKED_AT
+        pricingCheckedAt: p === 'deepseek' ? DEEPSEEK_PRICING_CHECKED_AT : PRICING_CHECKED_AT
       }
     },
     setSettings: async (patch) => {
       settings = normalizeSettings({ ...settings, ...patch })
-      // 新加的第三方平台：预览里没有真实接口，显示"未连接"
-      for (const c of settings.customPlatforms) {
-        snaps[c.id] ??= {
-          platform: c.id,
-          status: 'not_configured',
-          source: 'none',
-          windows: [],
-          fetchedAt: new Date().toISOString(),
-          error: { message: '浏览器预览不会真的查询', hint: '在桌面版里添加后会用填写的 Key 查询余额' }
-        }
-      }
       emit()
       return settings
     },

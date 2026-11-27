@@ -2,10 +2,10 @@
  * 定时调度：默认 5 分钟（最小 2 分钟）；429/5xx 指数退避（最长 30 分钟）；
  * 任一平台出错不影响其它平台；失败时保留上次快照并标 stale。
  */
-import { isBuiltin } from '../shared/quota'
+import { balanceStats } from '../shared/quota'
 import { claudeWebDeps } from './claude-web'
 import { fetchAntigravity } from './providers/antigravity'
-import { fetchCustom, fetchDeepSeek } from './providers/balance'
+import { fetchDeepSeek } from './providers/balance'
 import { fetchClaude } from './providers/claude'
 import { fetchCodex } from './providers/codex'
 import type { PlatformId, PlatformSnapshot, ProviderResult, RawEntry } from './providers/types'
@@ -138,9 +138,7 @@ export class Scheduler {
     if (p === 'codex') return fetchCodex(settings)
     if (p === 'antigravity') return fetchAntigravity(settings)
     if (p === 'deepseek') return fetchDeepSeek(settings)
-    const custom = isBuiltin(p) ? undefined : settings.customPlatforms.find((c) => c.id === p)
-    if (!custom) throw new ProviderError('平台已被删除', 'config', '')
-    return fetchCustom(custom, settings)
+    throw new ProviderError(`未知平台：${p}`, 'config', '')
   }
 
   private async run(p: PlatformId): Promise<void> {
@@ -170,8 +168,18 @@ export class Scheduler {
 
     const now = Date.now()
     if (next.status === 'ok') {
-      this.store.setCache(next)
       this.store.addHistory(next)
+      if (next.balance) {
+        this.store.addBalance(next)
+        next = {
+          ...next,
+          balance: {
+            ...next.balance,
+            stats: balanceStats(this.store.getBalanceHistory(p).points, now, next.balance.amount)
+          }
+        }
+      }
+      this.store.setCache(next)
       this.failures[p] = 0
       this.nextAt[p] = now + interval
     } else if (next.status === 'stale' && hasData(next)) {

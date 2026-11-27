@@ -5,7 +5,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { app } from 'electron'
-import { PRICING_CHECKED_AT, aggregateValue, valueRanges, type ModelPrice } from '../../shared/pricing'
+import { DEEPSEEK_PRICING_CHECKED_AT, PRICING_CHECKED_AT, aggregateValue, valueRanges, type ModelPrice } from '../../shared/pricing'
 import type { PlatformId, PlatformSnapshot, UnitPrice, UsageEvent, ValueReport } from '../providers/types'
 import { errorText } from '../util'
 import { scanAntigravity } from './antigravity'
@@ -14,8 +14,8 @@ import { scanCodex } from './codex'
 import { RETENTION_MS } from './files'
 
 /** 支持等价 API 价值的平台（有本机用量记录） */
-export type ValuePlatform = 'claude' | 'codex' | 'antigravity'
-export const VALUE_PLATFORMS: ValuePlatform[] = ['claude', 'codex', 'antigravity']
+export type ValuePlatform = 'claude' | 'codex' | 'antigravity' | 'deepseek'
+export const VALUE_PLATFORMS: ValuePlatform[] = ['claude', 'codex', 'antigravity', 'deepseek']
 
 const SCOPE: Record<ValuePlatform, { scope: string; caveat: string }> = {
   claude: {
@@ -29,6 +29,11 @@ const SCOPE: Record<ValuePlatform, { scope: string; caveat: string }> = {
   antigravity: {
     scope: 'Antigravity 本机对话记录',
     caveat: '只统计这台电脑上的 Antigravity 对话。'
+  },
+  deepseek: {
+    scope: 'Claude Code / Codex 本机记录里走 DeepSeek 的请求',
+    caveat:
+      'Cherry Studio、网页版等其它客户端的用量不在本机记录里，以余额变化为准。花费按官方价格估算，高峰 / 空闲按北京时间判断，法定节假日也按工作日算（可能略高估）。'
   }
 }
 
@@ -40,13 +45,19 @@ const OTHER_VENDORS = /^(deepseek|qwen|glm|kimi|moonshot|minimax|doubao|ernie|hu
 const MODEL_FILTER: Record<ValuePlatform, (model: string) => boolean> = {
   claude: (m) => /^claude/i.test(m),
   codex: (m) => !OTHER_VENDORS.test(m) && !/^(claude|gemini)/i.test(m),
-  antigravity: () => true
+  antigravity: () => true,
+  deepseek: (m) => /^deepseek/i.test(m)
 }
 
 const SCANNERS: Record<ValuePlatform, (since: number) => Promise<{ events: UsageEvent[]; files: number; error?: string }>> = {
   claude: scanClaudeCode,
   codex: scanCodex,
-  antigravity: scanAntigravity
+  antigravity: scanAntigravity,
+  // 通过 CC Switch 把 Claude Code / Codex 切到 DeepSeek 时，请求记在它们的本机记录里
+  deepseek: async (since) => {
+    const [a, b] = await Promise.all([scanClaudeCode(since), scanCodex(since)])
+    return { events: [...a.events, ...b.events], files: a.files + b.files }
+  }
 }
 
 /** 同一平台 20 秒内重复打开详情页不重复扫描 */
@@ -138,11 +149,11 @@ export async function getValueReport(p: ValuePlatform, snap: PlatformSnapshot | 
   return {
     platform: p,
     ...SCOPE[p],
-    ranges: valueRanges(snap, now).map((range) => aggregateValue(r.events, range, extra)),
+    ranges: valueRanges(snap, now).map((range) => aggregateValue(r.events, range, extra, p === 'deepseek' ? 'CNY' : 'USD')),
     scannedAt: new Date(r.at).toISOString(),
     files: r.files,
     earliest,
-    pricingCheckedAt: PRICING_CHECKED_AT,
+    pricingCheckedAt: p === 'deepseek' ? DEEPSEEK_PRICING_CHECKED_AT : PRICING_CHECKED_AT,
     error: r.error
   }
 }

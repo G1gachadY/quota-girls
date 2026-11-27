@@ -44,7 +44,7 @@ export function ArtImage({
   focus: string
   slot: Slot
   platform: PlatformId
-  /** 选水印图标用；没有官方图标的类型显示首字母 */
+  /** 选水印图标用 */
   kind?: IconKind
   accent: string
   letter: string
@@ -100,8 +100,8 @@ export function ArtImage({
   const info = SLOT_INFO[slot]
   return (
     <div className={`${s.wrap} ${s.ph} ${s[slot]} ${className ?? ''}`} style={vars}>
-      {slot === 'avatar' || !(kind && PLATFORM_ICONS_LARGE[kind]) ? (
-        <div className={`${s.letter} ${slot !== 'avatar' ? s.bigLetter : ''}`}>{letter}</div>
+      {slot === 'avatar' || !kind ? (
+        <div className={s.letter}>{letter}</div>
       ) : (
         <img className={s.logoMark} src={PLATFORM_ICONS_LARGE[kind]} alt="" draggable={false} />
       )}

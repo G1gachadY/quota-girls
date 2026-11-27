@@ -6,9 +6,9 @@ import type {
   AppSettings,
   ArtManifest,
   Balance,
+  BalancePoint,
+  BalanceStats,
   BuiltinId,
-  CustomKind,
-  CustomPlatform,
   PlatformId,
   PlatformInfo,
   PlatformSnapshot,
@@ -23,161 +23,28 @@ export const BUILTIN_META: Record<BuiltinId, { name: string; en: string; value: 
   claude: { name: 'Claude', en: 'CLAUDE', value: true },
   codex: { name: 'Codex', en: 'CODEX', value: true },
   antigravity: { name: 'Antigravity', en: 'ANTIGRAVITY', value: true },
-  deepseek: { name: 'DeepSeek', en: 'DEEPSEEK', value: false }
+  deepseek: { name: 'DeepSeek', en: 'DEEPSEEK', value: true }
 }
 
 export function isBuiltin(id: string): id is BuiltinId {
   return (BUILTIN_IDS as string[]).includes(id)
 }
 
-export interface CustomKindInfo {
-  label: string
-  /** 用户要填的地址；null = 固定用官方地址 */
-  url: null | { label: string; placeholder: string }
-  /** 官方地址的域名（固定地址的类型） */
-  host?: string
-  needsUserId?: boolean
-  needsPaths?: boolean
-  keyLabel: string
-  accent: string
-  hint: string
-}
-
-/** 自定义第三方平台的类型 */
-export const CUSTOM_KINDS: Record<CustomKind, CustomKindInfo> = {
-  'openai-billing': {
-    label: '中转站（API Key）',
-    url: { label: '中转站地址', placeholder: 'https://api.example.com' },
-    keyLabel: 'API Key（sk-…）',
-    accent: '#7C8BFF',
-    hint: '适用于 New API / One API 等中转站：用令牌的 /v1/dashboard/billing 接口查额度和已用量'
-  },
-  newapi: {
-    label: 'New API 账户',
-    url: { label: '站点地址', placeholder: 'https://api.example.com' },
-    needsUserId: true,
-    keyLabel: '系统访问令牌（个人设置 → 安全设置）',
-    accent: '#22C1A0',
-    hint: '查整个账户的余额：/api/user/self，需要系统访问令牌和用户 ID（按 500000 = $1 换算）'
-  },
-  openrouter: {
-    label: 'OpenRouter',
-    url: null,
-    host: 'openrouter.ai',
-    keyLabel: 'API Key（sk-or-…）',
-    accent: '#9CE14B',
-    hint: '官方接口 /api/v1/credits（失败时退回 /api/v1/key 的额度上限）'
-  },
-  moonshot: {
-    label: 'Kimi 开放平台',
-    url: null,
-    host: 'api.moonshot.cn',
-    keyLabel: 'API Key',
-    accent: '#E6E8EC',
-    hint: '官方接口 /v1/users/me/balance（人民币）'
-  },
-  siliconflow: {
-    label: '硅基流动',
-    url: null,
-    host: 'api.siliconflow.cn',
-    keyLabel: 'API Key',
-    accent: '#7C3AED',
-    hint: '官方接口 /v1/user/info（人民币）'
-  },
-  deepseek: {
-    label: 'DeepSeek（另一个账号）',
-    url: null,
-    host: 'api.deepseek.com',
-    keyLabel: 'API Key',
-    accent: '#4D6BFE',
-    hint: '官方接口 /user/balance；内置的 DeepSeek 卡片会自动读 CC Switch，这里用于第二个账号'
-  },
-  json: {
-    label: '自定义 JSON 接口',
-    url: { label: '查询地址（完整 URL）', placeholder: 'https://api.example.com/v1/balance' },
-    needsPaths: true,
-    keyLabel: 'Key（以 Bearer 方式发送，可留空）',
-    accent: '#F5B544',
-    hint: 'GET 这个地址，按字段路径取剩余（和总额）；Key 只会发往这个地址的域名'
-  }
-}
-
-export const CUSTOM_ID_RE = /^x-[a-z0-9]{4,24}$/
-const COLOR_RE = /^#[0-9a-f]{6}$/i
-const PATH_RE = /^[A-Za-z0-9_$.[\]-]{1,120}$/
-
-/** 自定义地址只接受 https，或者本机的 http（localhost / 127.0.0.1） */
-export function normalizeCustomUrl(raw: unknown): string | null {
-  if (typeof raw !== 'string' || !raw.trim()) return null
-  try {
-    const u = new URL(raw.trim())
-    const local = u.hostname === 'localhost' || u.hostname === '127.0.0.1'
-    if (u.protocol !== 'https:' && !(u.protocol === 'http:' && local)) return null
-    if (u.username || u.password) return null
-    return u.toString().replace(/\/+$/, '')
-  } catch {
-    return null
-  }
-}
-
-export function normalizeCustom(x: unknown): CustomPlatform | null {
-  if (!x || typeof x !== 'object') return null
-  const o = x as Record<string, unknown>
-  const id = typeof o.id === 'string' && CUSTOM_ID_RE.test(o.id) ? o.id : null
-  const kind = typeof o.kind === 'string' && o.kind in CUSTOM_KINDS ? (o.kind as CustomKind) : null
-  if (!id || !kind) return null
-  const info = CUSTOM_KINDS[kind]
-  const baseUrl = info.url ? normalizeCustomUrl(o.baseUrl) : ''
-  if (info.url && !baseUrl) return null
-  const str = (v: unknown, n: number) => (typeof v === 'string' ? v.trim().slice(0, n) : '')
-  const path = (v: unknown) => (typeof v === 'string' && PATH_RE.test(v.trim()) ? v.trim() : undefined)
-  if (info.needsPaths && !path(o.remainingPath)) return null
-  return {
-    id,
-    kind,
-    name: str(o.name, 24) || info.label,
-    baseUrl: baseUrl ?? '',
-    userId: info.needsUserId ? str(o.userId, 40) || undefined : undefined,
-    remainingPath: info.needsPaths ? path(o.remainingPath) : undefined,
-    totalPath: info.needsPaths ? path(o.totalPath) : undefined,
-    unit: info.needsPaths ? str(o.unit, 8) || undefined : undefined,
-    accent: typeof o.accent === 'string' && COLOR_RE.test(o.accent) ? o.accent : info.accent
-  }
-}
-
-export function newCustomId(): string {
-  return 'x-' + Math.random().toString(36).slice(2, 10).padEnd(8, '0')
-}
-
-/** 全部平台（内置在前，自定义按添加顺序），编号连续 */
+/** 全部平台，编号连续 */
 export function platformList(
   settings: AppSettings,
   extra?: (id: PlatformId) => Partial<PlatformInfo>
 ): PlatformInfo[] {
   const hidden = new Set(settings.hidden)
-  const base: Omit<PlatformInfo, 'no' | 'hidden'>[] = [
-    ...BUILTIN_IDS.map((id) => ({
-      id,
-      name: BUILTIN_META[id].name,
-      en: BUILTIN_META[id].en,
-      builtin: true,
-      kind: id,
-      value: BUILTIN_META[id].value
-    })),
-    ...settings.customPlatforms.map((c) => ({
-      id: c.id,
-      name: c.name,
-      en: c.name,
-      builtin: false,
-      kind: c.kind,
-      value: false
-    }))
-  ]
-  return base.map((p, i) => ({
-    ...p,
+  return BUILTIN_IDS.map((id, i) => ({
+    id,
+    name: BUILTIN_META[id].name,
+    en: BUILTIN_META[id].en,
+    kind: id,
+    value: BUILTIN_META[id].value,
     no: String(i + 1).padStart(2, '0'),
-    hidden: hidden.has(p.id),
-    ...(extra?.(p.id) ?? {})
+    hidden: hidden.has(id),
+    ...(extra?.(id) ?? {})
   }))
 }
 
@@ -220,28 +87,16 @@ export const DEFAULT_MANIFESTS: Record<BuiltinId, ArtManifest> = {
   }
 }
 
-/** 默认 manifest：内置平台用上面的；自定义平台用它的名字和颜色 */
-export function defaultManifest(id: PlatformId, settings?: AppSettings): ArtManifest {
-  if (isBuiltin(id)) return DEFAULT_MANIFESTS[id]
-  const c = settings?.customPlatforms.find((x) => x.id === id)
-  const accent = c?.accent ?? '#7C8BFF'
-  return {
-    name: c?.name ?? '第三方平台',
-    title: c ? CUSTOM_KINDS[c.kind].label : '自定义平台',
-    accent,
-    accent2: accent,
-    cardFocus: '50% 22%',
-    heroFocus: '70% 30%',
-    avatarFocus: '50% 18%'
-  }
+/** 默认 manifest */
+export function defaultManifest(id: PlatformId): ArtManifest {
+  return isBuiltin(id) ? DEFAULT_MANIFESTS[id] : DEFAULT_MANIFESTS.deepseek
 }
 
-export const DEFAULT_LOW_BALANCE = 5
+export const DEFAULT_LOW_BALANCE = 2
 
 export const DEFAULT_SETTINGS: AppSettings = {
   refreshMinutes: 5,
   primaryRule: { claude: 'tightest', codex: 'tightest', antigravity: 'tightest' },
-  customPlatforms: [],
   hidden: [],
   lowBalance: {},
   displayMode: 'remaining',
@@ -272,17 +127,7 @@ export function normalizeSettings(input: Partial<AppSettings> | undefined): AppS
   if (s.displayMode !== 'used') s.displayMode = 'remaining'
   if (s.copyStyle !== 'standard') s.copyStyle = 'game'
 
-  const seen = new Set<string>()
-  const customs: CustomPlatform[] = []
-  for (const raw of Array.isArray(input?.customPlatforms) ? input.customPlatforms : []) {
-    const c = normalizeCustom(raw)
-    if (c && !seen.has(c.id) && customs.length < 24) {
-      seen.add(c.id)
-      customs.push(c)
-    }
-  }
-  s.customPlatforms = customs
-  const ids = new Set<string>([...BUILTIN_IDS, ...customs.map((c) => c.id)])
+  const ids = new Set<string>(BUILTIN_IDS)
   s.hidden = (Array.isArray(input?.hidden) ? input.hidden : []).filter(
     (x): x is string => typeof x === 'string' && ids.has(x)
   )
@@ -314,6 +159,44 @@ export function balanceLevel(b: Balance, low: number): Level {
   const pct = balancePercent(b)
   if (pct != null && pct < 20) return 'low'
   return 'good'
+}
+
+/** [from, to] 区间内余额下降的总和（上升视为充值，不算消耗） */
+export function spentBetween(points: BalancePoint[], from: number, to: number): { spent: number; topUps: number } {
+  let spent = 0
+  let topUps = 0
+  for (let i = 1; i < points.length; i++) {
+    const cur = points[i]
+    if (cur.t <= from || cur.t > to) continue
+    const d = points[i - 1].a - cur.a
+    if (d > 0) spent += d
+    else if (d < 0) topUps -= d
+  }
+  return { spent, topUps }
+}
+
+const DAY = 86400 * 1000
+
+export function balanceStats(points: BalancePoint[], now: number, amount: number | null): BalanceStats {
+  const midnight = new Date(now)
+  midnight.setHours(0, 0, 0, 0)
+  const today = spentBetween(points, midnight.getTime(), now).spent
+  const from = now - 7 * DAY
+  const week = spentBetween(points, from, now)
+  const first = points.find((p) => p.t >= from)?.t ?? now
+  const spanMs = now - Math.max(from, first)
+  const spanDays = spanMs / DAY
+  // 记录不到半天时日均波动太大，不给数
+  const dailyAvg = spanMs >= DAY / 2 ? week.spent / Math.max(spanDays, 1 / 24) : null
+  const daysLeft = dailyAvg && dailyAvg > 0 && amount != null ? amount / dailyAvg : null
+  return { today, dailyAvg, spanDays, daysLeft, topUps: week.topUps }
+}
+
+export function formatDays(d: number | null): string {
+  if (d == null || !Number.isFinite(d)) return '—'
+  if (d < 1) return `约 ${Math.max(1, Math.round(d * 24))} 小时`
+  if (d >= 365) return '一年以上'
+  return `约 ${d < 10 ? d.toFixed(1) : Math.round(d)} 天`
 }
 
 const CURRENCY_SIGN: Record<string, string> = { CNY: '¥', RMB: '¥', USD: '$' }

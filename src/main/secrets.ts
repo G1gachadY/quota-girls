@@ -59,16 +59,3 @@ export function setSecret(id: string, value: string | null): void {
   }
   save(data)
 }
-
-/** 删掉不再存在的平台的 Key */
-export function pruneSecrets(keep: Set<string>): void {
-  const data = load()
-  let changed = false
-  for (const k of Object.keys(data)) {
-    if (!keep.has(k)) {
-      delete data[k]
-      changed = true
-    }
-  }
-  if (changed) save(data)
-}

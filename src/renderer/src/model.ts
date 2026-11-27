@@ -68,7 +68,7 @@ export function buildView(
 ): PlatformView {
   const id = info.id
   const snap: PlatformSnapshot = snapIn ?? { platform: id, status: 'loading', source: 'none', windows: [], fetchedAt: new Date(now).toISOString() }
-  const { manifest, files } = art[id] ?? { manifest: defaultManifest(id, settings), files: {} }
+  const { manifest, files } = art[id] ?? { manifest: defaultManifest(id), files: {} }
   const windows = snap.windows.map((w) => effectiveWindow(w, now))
   const primary = pickPrimary(snap, settings.primaryRule[id], now)
   // 余额平台没有额度窗口：知道总额时按 剩余/总额，否则只按金额判断紧张程度
@@ -211,12 +211,5 @@ export const SOURCE_LABELS: Record<string, string> = {
   'cc-switch': '余额接口 · Key 来自 CC Switch',
   manual: '余额接口 · 手动填写的 Key',
   env: '余额接口 · 环境变量 Key',
-  'openai-billing': '中转站账单接口',
-  newapi: 'New API 账户接口',
-  openrouter: 'OpenRouter 官方接口',
-  moonshot: 'Kimi 官方接口',
-  siliconflow: '硅基流动官方接口',
-  deepseek: 'DeepSeek 官方接口',
-  json: '自定义 JSON 接口',
   none: '—'
 }

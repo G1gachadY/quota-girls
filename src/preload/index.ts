@@ -16,6 +16,7 @@ const api: QuotaAPI = {
   onState: (cb) => subscribe('state:update', cb),
   refresh: (platform) => ipcRenderer.invoke('quota:refresh', platform),
   getHistory: (platform) => ipcRenderer.invoke('history:get', platform),
+  getBalanceHistory: (platform) => ipcRenderer.invoke('balance:history', platform),
   getRaw: (platform) => ipcRenderer.invoke('raw:get', platform),
   getValue: (platform) => ipcRenderer.invoke('value:get', platform),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),

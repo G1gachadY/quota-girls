@@ -4,7 +4,15 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { normalizeSettings } from '../shared/quota'
-import type { AppSettings, HistoryPoint, HistorySeries, PlatformId, PlatformSnapshot } from './providers/types'
+import type {
+  AppSettings,
+  BalanceHistory,
+  BalancePoint,
+  HistoryPoint,
+  HistorySeries,
+  PlatformId,
+  PlatformSnapshot
+} from './providers/types'
 
 class JsonFile<T> {
   data: T
@@ -55,6 +63,8 @@ export class Store {
   history: JsonFile<HistoryFile>
   cache: JsonFile<Partial<Record<PlatformId, PlatformSnapshot>>>
   notified: JsonFile<Record<string, number>>
+  /** 余额历史：每个平台 { currency, points } */
+  balances: JsonFile<Partial<Record<PlatformId, BalanceHistory>>>
 
   constructor(public dir: string) {
     this.settings = new JsonFile(path.join(dir, 'settings.json'), () => normalizeSettings({}), (r) =>
@@ -63,6 +73,27 @@ export class Store {
     this.history = new JsonFile<HistoryFile>(path.join(dir, 'history.json'), () => ({}))
     this.cache = new JsonFile(path.join(dir, 'snapshots.json'), () => ({}))
     this.notified = new JsonFile<Record<string, number>>(path.join(dir, 'notified.json'), () => ({}))
+    this.balances = new JsonFile(path.join(dir, 'balance-history.json'), () => ({}))
+  }
+
+  /** 记录余额：金额变了就记一点，没变时每小时记一点；保留 90 天 */
+  addBalance(s: PlatformSnapshot): void {
+    const b = s.balance
+    if (s.status !== 'ok' || !b || b.amount == null) return
+    const t = Date.parse(s.fetchedAt) || Date.now()
+    const h = (this.balances.data[s.platform] ??= { currency: b.currency, points: [] })
+    h.currency = b.currency
+    const last = h.points[h.points.length - 1]
+    const a = Math.round(b.amount * 10000) / 10000
+    if (!last || last.a !== a || t - last.t >= 3600 * 1000) h.points.push({ t, a })
+    const cutoff = Date.now() - 90 * 86400 * 1000
+    while (h.points.length && (h.points[0].t < cutoff || h.points.length > 6000)) h.points.shift()
+    this.balances.saveSoon()
+  }
+
+  getBalanceHistory(platform: PlatformId): BalanceHistory {
+    const h = this.balances.data[platform]
+    return { currency: h?.currency ?? 'CNY', points: (h?.points ?? []) as BalancePoint[] }
   }
 
   updateSettings(patch: Partial<AppSettings>): AppSettings {
@@ -111,18 +142,6 @@ export class Store {
     this.cache.saveSoon()
   }
 
-  /** 删除平台后清掉它的快照缓存和历史 */
-  forget(platform: PlatformId): void {
-    if (platform in this.cache.data) {
-      delete this.cache.data[platform]
-      this.cache.saveSoon()
-    }
-    if (platform in this.history.data) {
-      delete this.history.data[platform]
-      this.history.saveSoon()
-    }
-  }
-
   /** 每个窗口每个周期只提醒一次 */
   markNotified(key: string): boolean {
     if (this.notified.data[key]) return false
@@ -138,5 +157,6 @@ export class Store {
     this.history.saveNow()
     this.cache.saveNow()
     this.notified.saveNow()
+    this.balances.saveNow()
   }
 }

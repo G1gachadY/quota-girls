@@ -6,7 +6,7 @@
 /** 内置平台 */
 export type BuiltinId = 'claude' | 'codex' | 'antigravity' | 'deepseek'
 
-/** 平台 id：内置平台，或自定义第三方平台（'x-' 开头） */
+/** 平台 id（目前都是内置平台） */
 export type PlatformId = string
 
 export interface QuotaWindow {
@@ -34,7 +34,7 @@ export type SnapshotStatus =
 
 export type SourceId = 'oauth' | 'web' | 'api' | 'rpc' | 'local-log' | 'local-ls' | 'none'
 
-/** 预付费余额（DeepSeek / 中转站 / OpenRouter 等按量付费平台） */
+/** 预付费余额（DeepSeek 等按量付费平台） */
 export interface Balance {
   /** 剩余；不限额度的中转站令牌为 null */
   amount: number | null
@@ -46,6 +46,32 @@ export interface Balance {
   used?: number | null
   /** 明细：充值 / 赠送 / 代金券 … */
   parts?: { label: string; amount: number }[]
+  /** 根据本机记录的余额历史算出的消耗（main 计算） */
+  stats?: BalanceStats
+}
+
+/** 余额历史里的一个点：t = 毫秒时间戳，a = 当时余额 */
+export interface BalancePoint {
+  t: number
+  a: number
+}
+
+export interface BalanceHistory {
+  currency: string
+  points: BalancePoint[]
+}
+
+export interface BalanceStats {
+  /** 今天（本地时间 0 点起）已消耗 */
+  today: number
+  /** 近 7 天日均消耗；记录不足 12 小时时为 null */
+  dailyAvg: number | null
+  /** 日均是基于多少天的记录算的（不足 7 天时 <7） */
+  spanDays: number
+  /** 按日均消耗，余额还能用几天 */
+  daysLeft: number | null
+  /** 近 7 天检测到的充值 */
+  topUps: number
 }
 
 export interface PlatformSnapshot {
@@ -97,37 +123,16 @@ export interface SourcePrefs {
 /** 'tightest' = 最紧张的窗口；其它字符串 = 固定某个窗口 id */
 export type PrimaryRule = 'tightest' | string
 
-/** 自定义第三方平台的查询方式 */
-export type CustomKind = 'openai-billing' | 'newapi' | 'openrouter' | 'moonshot' | 'siliconflow' | 'deepseek' | 'json'
-
-/** 自定义第三方平台（Key 不在这里：加密保存在 main 进程，renderer 永远拿不到） */
-export interface CustomPlatform {
-  /** 'x-' + 随机字符 */
-  id: string
-  name: string
-  kind: CustomKind
-  /** 中转站根地址 / JSON 接口完整地址；官方厂商类型固定用官方地址，忽略此项 */
-  baseUrl: string
-  /** New API：用户 ID */
-  userId?: string
-  /** JSON：剩余 / 总额字段路径（如 data.balance），单位 */
-  remainingPath?: string
-  totalPath?: string
-  unit?: string
-  accent: string
-}
-
 /** 平台列表里的一项（main 计算后放进 AppState） */
 export interface PlatformInfo {
   id: PlatformId
   name: string
-  /** 卡片标题：CLAUDE / 用户起的名字 */
+  /** 卡片标题：CLAUDE */
   en: string
   /** 编号 01、02 … */
   no: string
-  builtin: boolean
-  /** 自定义平台的类型；内置平台为自身 id（用于选图标） */
-  kind: CustomKind | BuiltinId
+  /** 选图标用 */
+  kind: BuiltinId
   hidden: boolean
   /** 支持"等价 API 价值" */
   value: boolean
@@ -139,8 +144,6 @@ export interface AppSettings {
   /** 刷新间隔（分钟），最小 2 */
   refreshMinutes: number
   primaryRule: Record<PlatformId, PrimaryRule>
-  /** 自定义第三方平台 */
-  customPlatforms: CustomPlatform[]
   /** 隐藏的平台：不显示、不刷新 */
   hidden: PlatformId[]
   /** 余额低于该值时提醒（按各平台自己的货币单位），0 = 不提醒 */
@@ -270,6 +273,10 @@ export interface ValueModelRow {
 export interface ValueRange {
   id: 'session' | 'weekly' | 'month'
   label: string
+  /** 切换按钮上的短标签：5H / 本周 / 今天 / 7天 / 30天 */
+  short: string
+  /** 金额的币种（同一平台的模型币种一致） */
+  currency: string
   from: number
   to: number
   total: number
@@ -318,6 +325,8 @@ export interface QuotaAPI {
   onState(cb: (state: AppState) => void): () => void
   refresh(platform?: PlatformId): Promise<void>
   getHistory(platform: PlatformId): Promise<HistorySeries>
+  /** 余额历史（按量付费平台） */
+  getBalanceHistory(platform: PlatformId): Promise<BalanceHistory>
   getRaw(platform: PlatformId): Promise<RawEntry[]>
   /** 按官方 API 定价折算本机记录里的用量 */
   getValue(platform: PlatformId): Promise<ValueReport | null>

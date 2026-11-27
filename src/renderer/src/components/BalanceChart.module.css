@@ -1,0 +1,59 @@
+.wrap {
+  position: relative;
+}
+
+.svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.grid {
+  stroke: rgba(255, 255, 255, 0.07);
+  stroke-width: 1;
+}
+
+.yLabel {
+  fill: var(--fg-3);
+  font-family: var(--font-num);
+  font-size: 9px;
+  text-anchor: end;
+}
+
+.xLabel {
+  fill: var(--fg-3);
+  font-family: var(--font-num);
+  font-size: 9px;
+  text-anchor: middle;
+}
+
+.cursor {
+  stroke: rgba(255, 255, 255, 0.25);
+  stroke-dasharray: 3 3;
+}
+
+.tip {
+  position: absolute;
+  top: -4px;
+  right: 6px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(10, 12, 18, 0.85);
+  border: 1px solid var(--line-2);
+  font-size: 11px;
+  color: var(--fg-2);
+  pointer-events: none;
+}
+
+.tip b {
+  color: var(--fg);
+  font-family: var(--font-num);
+}
+
+.empty {
+  padding: 10px 2px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--fg-3);
+}

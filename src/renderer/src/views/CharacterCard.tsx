@@ -6,7 +6,7 @@ import { IconAlert } from '../components/Icons'
 import { PlatformIcon } from '../components/PlatformIcon'
 import { SafeZones } from '../components/SafeZones'
 import { displayValue, fmtPct, levelColor, moodOf, pickArt, resetText, statusText, type PlatformView } from '../model'
-import { balancePercent, formatMoney, levelOf, remainingOf } from '@shared/quota'
+import { balancePercent, formatDays, formatMoney, levelOf, remainingOf } from '@shared/quota'
 import s from './Card.module.css'
 
 interface Props {
@@ -261,9 +261,15 @@ function BalanceBlock({ view: v, value }: { view: PlatformView; value: number | 
         </div>
       </div>
       <div className={s.countdown}>
-        <span className="deco">BILLING</span>
+        <span className="deco">{b.stats?.dailyAvg != null ? 'DAILY' : 'BILLING'}</span>
         <span className={s.cdText}>
-          {b.used != null && !unlimited ? `已用 ${formatMoney(b.used, b.currency)}` : '按量付费 · 不会自动回满'}
+          {b.stats?.dailyAvg != null
+            ? `日均 ${formatMoney(b.stats.dailyAvg, b.currency)} · ${formatDays(b.stats.daysLeft)}`
+            : b.stats && b.stats.today > 0
+              ? `今日已用 ${formatMoney(b.stats.today, b.currency)}`
+              : b.used != null && !unlimited
+                ? `已用 ${formatMoney(b.used, b.currency)}`
+                : '按量付费 · 不会自动回满'}
         </span>
       </div>
     </>

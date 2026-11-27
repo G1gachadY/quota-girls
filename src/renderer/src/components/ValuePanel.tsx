@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { useState } from 'react'
-import { formatTokens, formatUnit, formatUsd, totalTokens } from '@shared/pricing'
+import { formatCost, formatTokens, formatUnit, totalTokens } from '@shared/pricing'
 import type { PlatformId, UsageTokens, ValueModelRow, ValueRange, ValueReport } from '../../../main/providers/types'
 import s from './ValuePanel.module.css'
 
@@ -39,7 +39,7 @@ export function ValuePanel({
   return (
     <div className={s.box}>
       <div className={s.summary}>
-        <div className={s.total}>{formatUsd(range.total)}</div>
+        <div className={s.total}>{formatCost(range.total, range.currency)}</div>
         <div className={s.meta}>
           <span>按官方 API 定价折算 · {range.label}</span>
           <span>
@@ -67,7 +67,7 @@ export function ValuePanel({
                     {m.label}
                   </span>
                   <span className={s.tok}>{formatTokens(totalTokens(m.tokens))}</span>
-                  <span className={`${s.cost} ${m.priced ? '' : s.unpriced}`}>{m.priced ? formatUsd(m.total) : '无公开定价'}</span>
+                  <span className={`${s.cost} ${m.priced ? '' : s.unpriced}`}>{m.priced ? formatCost(m.total, range.currency) : '无公开定价'}</span>
                   <span className={s.share}>
                     <i style={{ width: `${max > 0 && m.priced ? Math.max(2, (m.total / max) * 100) : 0}%` }} />
                   </span>
@@ -81,7 +81,7 @@ export function ValuePanel({
                       exit={{ height: 0, opacity: 0 }}
                       transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
                     >
-                      <Breakdown m={m} platform={platform} />
+                      <Breakdown m={m} platform={platform} currency={range.currency} />
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -92,7 +92,10 @@ export function ValuePanel({
       )}
 
       <p className={s.note}>
-        统计 {report.scope}。{report.caveat} 单价为官方标准价（{report.pricingCheckedAt} 核对），不含订阅折扣与税费。
+        统计 {report.scope}。{report.caveat}{' '}
+        {platform === 'deepseek'
+          ? `单价为 DeepSeek 官方价（${report.pricingCheckedAt} 核对，元 / 百万 tokens），空闲时段半价。`
+          : `单价为官方标准价（${report.pricingCheckedAt} 核对），不含订阅折扣与税费。`}
       </p>
     </div>
   )
@@ -106,7 +109,7 @@ const LINES: { key: keyof UsageTokens; label: string; claudeLabel?: string }[] =
   { key: 'cacheRead', label: '缓存读取' }
 ]
 
-function Breakdown({ m, platform }: { m: ValueModelRow; platform: PlatformId }) {
+function Breakdown({ m, platform, currency }: { m: ValueModelRow; platform: PlatformId; currency: string }) {
   const lines = LINES.filter((l) => m.tokens[l.key] > 0)
   return (
     <div className={s.detail}>
@@ -117,16 +120,16 @@ function Breakdown({ m, platform }: { m: ValueModelRow; platform: PlatformId }) 
             <span className={s.lLabel}>{platform === 'claude' && l.claudeLabel ? l.claudeLabel : l.label}</span>
             <span className={s.lCalc}>
               {formatTokens(m.tokens[l.key])}
-              {m.priced && m.unit && <> × {formatUnit(m.unit[l.key])}/M</>}
+              {m.priced && m.unit && <> × {formatUnit(m.unit[l.key], currency)}/M</>}
             </span>
-            <span className={s.lCost}>{m.priced ? formatUsd(m.cost[l.key]) : '—'}</span>
+            <span className={s.lCost}>{m.priced ? formatCost(m.cost[l.key], currency) : '—'}</span>
           </div>
         ))}
         {m.cost.extra > 0 && (
           <div className={s.line}>
             <span className={s.lLabel}>网页搜索</span>
             <span className={s.lCalc}>$10 / 千次</span>
-            <span className={s.lCost}>{formatUsd(m.cost.extra)}</span>
+            <span className={s.lCost}>{formatCost(m.cost.extra, currency)}</span>
           </div>
         )}
       </div>

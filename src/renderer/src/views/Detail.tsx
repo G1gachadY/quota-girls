@@ -1,8 +1,9 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { useMemo, useState, type CSSProperties, type ReactNode } from 'react'
-import { balancePercent, formatAgo, formatClock, formatMoney, levelOf, remainingOf } from '@shared/quota'
+import { balancePercent, formatAgo, formatClock, formatDays, formatMoney, levelOf, remainingOf } from '@shared/quota'
 import type { AppSettings, PlatformId } from '../../../main/providers/types'
 import { ArtImage } from '../components/ArtImage'
+import { BalanceChart } from '../components/BalanceChart'
 import { Bar, Ring, RollingNumber } from '../components/Gauges'
 import { HistoryChart } from '../components/HistoryChart'
 import { IconAlert } from '../components/Icons'
@@ -20,7 +21,7 @@ import {
   statusText,
   type PlatformView
 } from '../model'
-import { useHistory, useValue } from '../state'
+import { useBalanceHistory, useHistory, useValue } from '../state'
 import s from './Detail.module.css'
 
 export function Detail({
@@ -45,6 +46,9 @@ export function Detail({
   const mode = settings.displayMode
   const bal = v.balance
   const balPct = balancePercent(bal)
+  const balHistory = useBalanceHistory(v.id, v.snap.fetchedAt, !!bal)
+  const [balRange, setBalRange] = useState<'7d' | '30d'>('7d')
+  const stats = bal?.stats
   const value = bal ? balPct ?? (bal.amount == null || bal.amount > 0 ? 100 : 0) : displayValue(v.primary, mode)
   const st = statusText(v, now)
   const order = useMemo(() => v.windows.map((w) => ({ id: w.id, label: w.label })), [v.windows])
@@ -200,6 +204,51 @@ export function Detail({
           </>
         )}
 
+        {bal && (
+          <>
+            <Section
+              title="余额走势"
+              en="BALANCE HISTORY"
+              right={
+                <div className={s.seg}>
+                  <button className={balRange === '7d' ? s.segOn : ''} onClick={() => setBalRange('7d')}>
+                    7D
+                  </button>
+                  <button className={balRange === '30d' ? s.segOn : ''} onClick={() => setBalRange('30d')}>
+                    30D
+                  </button>
+                </div>
+              }
+            />
+            <div className={s.balStats}>
+              <div>
+                <span>今日消耗</span>
+                <b>{stats ? formatMoney(stats.today, bal.currency) : '—'}</b>
+              </div>
+              <div>
+                <span>{stats && stats.spanDays < 6.5 ? `日均（近 ${Math.max(1, Math.round(stats.spanDays))} 天）` : '近 7 天日均'}</span>
+                <b>{stats?.dailyAvg != null ? formatMoney(stats.dailyAvg, bal.currency) : '记录不足'}</b>
+              </div>
+              <div>
+                <span>按日均还能用</span>
+                <b style={{ color: stats?.daysLeft != null && stats.daysLeft < 3 ? 'var(--red)' : undefined }}>
+                  {formatDays(stats?.daysLeft ?? null)}
+                </b>
+              </div>
+            </div>
+            <BalanceChart
+              points={balHistory?.points ?? []}
+              currency={bal.currency}
+              range={balRange}
+              now={now}
+              accent={v.manifest.accent}
+            />
+            {stats && stats.topUps > 0 && (
+              <div className={s.muted}>近 7 天检测到充值 {formatMoney(stats.topUps, bal.currency)}（充值不计入消耗）</div>
+            )}
+          </>
+        )}
+
         {!bal && <Section title="全部窗口" en="ALL WINDOWS" />}
         {!bal && (
         <ul className={s.windows}>
@@ -227,16 +276,16 @@ export function Detail({
         {v.info.value && (
           <>
         <Section
-          title="等价 API 价值"
-          en="API VALUE"
+          title={v.id === 'deepseek' ? '本机用量与花费' : '等价 API 价值'}
+          en={v.id === 'deepseek' ? 'USAGE & COST' : 'API VALUE'}
           right={
             <div className={s.seg}>
-              {(
-                [
+              {(apiValue?.ranges.map((r) => [r.id, r.short] as const) ??
+                ([
                   ['session', '5H'],
                   ['weekly', '本周'],
                   ['month', '30天']
-                ] as const
+                ] as const)
               ).map(([id, text]) => (
                 <button key={id} className={valueRange === id ? s.segOn : ''} onClick={() => setValueRange(id)}>
                   {text}

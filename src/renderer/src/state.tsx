@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { BUILTIN_IDS, DEFAULT_MANIFESTS } from '@shared/quota'
-import type { AppState, ArtState, HistorySeries, PlatformId, ValueReport } from '../../main/providers/types'
+import type { AppState, ArtState, BalanceHistory, HistorySeries, PlatformId, ValueReport } from '../../main/providers/types'
 import { api } from './api'
 
 interface Data {
@@ -78,4 +78,18 @@ export function useValue(platform: PlatformId, version: string | undefined): Val
     }
   }, [platform, version])
   return v
+}
+
+/** 余额历史：打开详情页和每次刷新后重新取 */
+export function useBalanceHistory(platform: PlatformId, version: string | undefined, enabled: boolean): BalanceHistory | null {
+  const [h, setH] = useState<BalanceHistory | null>(null)
+  useEffect(() => {
+    if (!enabled) return
+    let alive = true
+    api.getBalanceHistory(platform).then((r) => alive && setH(r))
+    return () => {
+      alive = false
+    }
+  }, [platform, version, enabled])
+  return enabled ? h : null
 }
