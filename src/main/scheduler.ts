@@ -4,6 +4,7 @@
  */
 import { balanceStats } from '../shared/quota'
 import { claudeWebDeps } from './claude-web'
+import { proxyState } from './proxy'
 import { fetchAntigravity } from './providers/antigravity'
 import { fetchDeepSeek } from './providers/balance'
 import { fetchClaude } from './providers/claude'
@@ -15,6 +16,11 @@ import { ProviderError, errorText, nowIso } from './util'
 const MAX_BACKOFF = 30 * 60 * 1000
 const OFFLINE_RECHECK = 2 * 60 * 1000
 const MANUAL_MIN_GAP = 15 * 1000
+/** 访问国外网站的平台：只在代理开着时刷新 */
+const NEEDS_PROXY = new Set<PlatformId>(['claude', 'codex'])
+/** 代理没开时多久再检查一次 */
+const PROXY_RECHECK = 60 * 1000
+export const PROXY_OFF_NOTE = '代理未开启 · 暂停更新'
 
 type Listener = (p: PlatformId, prev: PlatformSnapshot | undefined, next: PlatformSnapshot) => void
 
@@ -148,6 +154,31 @@ export class Scheduler {
     const lastGood = this.store.cache.data[p]
     let next: PlatformSnapshot
     let retryable = false
+
+    // 代理没开：不发请求，保留上次数据并标注；不报错、不通知，1 分钟后再看
+    if (NEEDS_PROXY.has(p)) {
+      const proxy = await proxyState()
+      if (!proxy.on) {
+        this.raw[p] = [{ label: '跳过：代理未开启（没有检测到 TUN 网卡或系统代理）', at: nowIso(), body: null }]
+        next =
+          lastGood && (lastGood.windows.length > 0 || lastGood.balance)
+            ? { ...lastGood, status: 'stale', note: PROXY_OFF_NOTE, error: undefined }
+            : {
+                platform: p,
+                status: 'offline',
+                source: prev?.source ?? 'none',
+                windows: [],
+                fetchedAt: nowIso(),
+                error: { message: '代理未开启', hint: '打开 Clash 的 TUN 模式或系统代理后自动更新' }
+              }
+        this.nextAt[p] = Date.now() + PROXY_RECHECK
+        if (!this.snapshots[p]) return
+        this.snapshots[p] = next
+        for (const l of this.listeners) l(p, prev, next)
+        return
+      }
+    }
+
     try {
       const r = await this.fetchOne(p)
       this.raw[p] = r.raw

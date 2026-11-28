@@ -262,6 +262,7 @@ npm run dist
 - **开机自启**：只在安装版里生效（开发模式注册的会是 electron.exe）；自启时带 `--hidden` 只进托盘。
 - **关闭按钮**：默认"最小化到托盘"；关闭此项后点 × 会退出程序。
 - **刷新**：默认 5 分钟（最小 2 分钟）；429/5xx 退避为 间隔×2ⁿ，最长 30 分钟；Antigravity 未运行时每 2 分钟复查一次；手动刷新同一平台 15 秒内只生效一次。窗口隐藏时照常刷新。
+- **Claude / Codex 只在有代理时刷新**：它们要访问国外网站。有代理 = 有代理软件的 TUN 虚拟网卡（Mihomo / Clash / sing-box / Wintun 等，或网卡地址在 198.18.0.0/15），或者 Windows 系统代理开着；只开着 Clash 但没开 TUN / 系统代理不算。没有代理时不发请求、不报错、不通知，卡片保留上次数据并标"代理未开启 · 暂停更新"，每分钟检查一次，代理一开自动刷新。DeepSeek（国内接口）和 Antigravity（只读本机）不受影响。开发时可用 `QG_FORCE_PROXY=on/off` 强制指定。
 - **等价 API 价值的统计窗口**：只看近 30 天（再往前的记录不扫描，保证打开详情页时快）；同一平台 20 秒内重复打开不重新扫描。实测本机 Claude Code 108 MB 记录首次扫描约 0.3 秒，Codex 574 MB 约 0.7 秒，之后只读新增部分。
 - **Codex 恢复的会话**：恢复后累计用量从旧值继续，所以不能用累计值，改用逐次请求的记录；在第一条 `turn_context` 之前出现的请求，记到之后第一次出现的模型上。
 - **新增平台的范围**：DeepSeek 做成内置平台（本机 CC Switch 里配置了它）；阿里云百炼 Token Plan 没有用套餐 Key 查剩余 Credits 的公开接口（官方 CLI 要阿里云 AccessKey，套餐条款也禁止把套餐 Key 用在自动化脚本里），所以没做；Gemini CLI 查额度要用 Google OAuth，和"不碰 Google OAuth"的原则冲突，也没做。曾做过"自定义第三方平台"（中转站 / OpenRouter / Kimi 等），按需求先移除，代码可从提交 2db50c9 找回。
@@ -282,6 +283,7 @@ src/main/providers/claude.ts   Claude：OAuth / 网页 / sessionKey
 src/main/providers/codex.ts    Codex：API / CLI RPC / 本地日志
 src/main/providers/antigravity.ts  Antigravity：本地 language server
 src/main/claude-web.ts         Claude 内嵌登录窗口与隐藏取数窗口
+src/main/proxy.ts              判断代理是否开着（TUN 网卡 / 系统代理）
 src/main/net.ts                网络层（域名白名单、仅 127.0.0.1 放行自签名）
 src/main/store.ts              设置 + 历史 + 快照缓存（JSON）
 src/main/art.ts                art:// 协议、目录监听

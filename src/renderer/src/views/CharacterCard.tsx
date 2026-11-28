@@ -101,7 +101,13 @@ export const CharacterCard = forwardRef<HTMLDivElement, Props>(function Characte
       {v.disconnected && !loading && (
         <div className={s.disconnected}>
           <div className={s.discMain}>
-            {v.snap.status === 'offline' ? '未运行' : v.snap.status === 'error' ? '连接失败' : '未连接'}
+            {v.snap.status === 'offline'
+              ? v.snap.error?.message === '代理未开启'
+                ? '代理未开启'
+                : '未运行'
+              : v.snap.status === 'error'
+                ? '连接失败'
+                : '未连接'}
           </div>
           <div className={s.discSub}>
             {v.snap.status === 'offline'

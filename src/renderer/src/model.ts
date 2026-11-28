@@ -188,7 +188,10 @@ export function statusText(v: PlatformView, now: number): { text: string; dot: s
     case 'stale':
       return { text: `${ago} · ${s.note ?? '数据可能已过期'}`, dot: 'var(--amber)' }
     case 'offline':
-      return { text: v.hasData ? `未运行 · ${ago}` : '未运行', dot: 'rgba(233,236,242,0.35)' }
+      return {
+        text: s.error?.message === '代理未开启' ? '代理未开启 · 暂停更新' : v.hasData ? `未运行 · ${ago}` : '未运行',
+        dot: 'rgba(233,236,242,0.35)'
+      }
     case 'auth_expired':
       return { text: v.hasData ? `登录已过期 · ${ago}` : '登录已过期', dot: 'var(--red)' }
     case 'error':

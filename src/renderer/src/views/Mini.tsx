@@ -87,8 +87,10 @@ export function MiniApp() {
             <span className={s.cd} style={bal ? { color: v.color } : undefined}>
               {bal
                 ? formatMoney(bal.amount ?? bal.used ?? null, bal.currency)
-                : v.snap.status === 'offline' && !v.hasData
-                  ? '未运行'
+                : v.snap.note?.startsWith('代理未开启')
+                  ? '暂停'
+                  : v.snap.status === 'offline' && !v.hasData
+                  ? (v.snap.error?.message === '代理未开启' ? '无代理' : '未运行')
                   : resetText(v.primary, now, v.copy).replace(/后(回满|重置)$/, '')}
             </span>
           </div>
