@@ -1,7 +1,7 @@
 {
   "name": "quota-girls",
   "productName": "QuotaGirls",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "额度娘 Quota Girls — AI 订阅用量看板",
   "main": "./out/main/index.js",
   "author": "Quota Girls",
